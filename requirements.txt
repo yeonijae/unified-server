@@ -1,0 +1,9 @@
+flask
+flask-cors
+pymssql
+pystray
+Pillow
+schedule
+watchdog
+pyinstaller
+pycryptodome

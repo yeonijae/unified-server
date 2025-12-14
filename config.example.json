@@ -1,0 +1,26 @@
+{
+  "static_port": 11111,
+  "static_auto_start": false,
+  "www_folder": "",
+  "auto_build": false,
+  "webhook_enabled": false,
+  "webhook_secret": "YOUR_GITHUB_WEBHOOK_SECRET",
+  "repo_url": "",
+  "mssql_api_port": 3100,
+  "mssql_auto_start": false,
+  "mssql": {
+    "server": "YOUR_MSSQL_SERVER",
+    "port": 55555,
+    "user": "YOUR_USERNAME",
+    "password": "YOUR_PASSWORD",
+    "database": "MasterDB"
+  },
+  "sqlite_api_port": 3200,
+  "sqlite_auto_start": false,
+  "sqlite_db_path": "",
+  "backup_enabled": false,
+  "backup_folder": "",
+  "backup_interval_hours": 24,
+  "last_backup": "",
+  "start_with_windows": false
+}
