@@ -1,45 +1,6 @@
-# Build outputs
-build/
-dist/
-*.spec
+# 모든 파일 제외
+*
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-.venv/
-
-# Config (민감 정보)
-config.json
-config.enc
-
-# Source code (암호화된 .enc만 배포)
-routes/mssql_routes.py
-
-# 암호화된 API 모듈은 올림
+# mssql_routes.enc만 포함
 !mssql_routes.enc
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Logs
-*.log
-
-# Bundled tools (서버에서 별도 설치)
-bun.exe
-mingit/
-
-# SQLite databases
-*.sqlite
-*.db
-
-# OS
-.DS_Store
-Thumbs.db
+!.gitignore
