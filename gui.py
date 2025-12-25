@@ -300,6 +300,7 @@ class UnifiedServerGUI:
         db_btn_row.pack(fill=tk.X, pady=(5, 0))
         ttk.Button(db_btn_row, text="Create New", command=self._create_sqlite_db).pack(side=tk.LEFT, padx=2)
         ttk.Button(db_btn_row, text="Run SQL...", command=self._run_sql_file).pack(side=tk.LEFT, padx=2)
+        ttk.Button(db_btn_row, text="Update API", command=self._download_enc_and_reload).pack(side=tk.LEFT, padx=2)
 
         # 백업 설정
         backup_frame = ttk.LabelFrame(tab, text="Backup", padding=8)
@@ -580,6 +581,50 @@ class UnifiedServerGUI:
     def _toggle_webhook_secret(self):
         current = self.webhook_secret_entry.cget('show')
         self.webhook_secret_entry.configure(show="" if current == "*" else "*")
+
+    def _download_enc_and_reload(self):
+        """GitHub에서 enc 파일 다운로드 후 핫 리로드"""
+        def do_download():
+            try:
+                # 다운로드
+                sqlite_db.log("enc 파일 다운로드 시작...", force=True)
+                success, has_changes = git_build.download_enc_from_github_http()
+
+                if not success:
+                    self.root.after(0, lambda: sqlite_db.log("다운로드 실패", force=True))
+                    self.root.after(0, lambda: messagebox.showerror("Error", "enc 파일 다운로드 실패"))
+                    return
+
+                if not has_changes:
+                    self.root.after(0, lambda: sqlite_db.log("변경사항 없음", force=True))
+                    self.root.after(0, lambda: messagebox.showinfo("Info", "이미 최신 버전입니다."))
+                    return
+
+                # 다운로드 성공, 핫 리로드 시도
+                self.root.after(0, lambda: sqlite_db.log("다운로드 완료, 핫 리로드 중...", force=True))
+
+                if self.mssql_running:
+                    from services.mssql_loader import hot_reload_routes
+                    reload_success, new_version, message = hot_reload_routes()
+
+                    if reload_success:
+                        self.root.after(0, lambda: self._on_mssql_reload(new_version))
+                        self.root.after(0, lambda: sqlite_db.log(f"핫 리로드 완료: v{new_version}", force=True))
+                        self.root.after(0, lambda: messagebox.showinfo("Success", f"API 업데이트 완료: v{new_version}"))
+                    else:
+                        self.root.after(0, lambda: sqlite_db.log(f"핫 리로드 실패: {message}", force=True))
+                        self.root.after(0, lambda: messagebox.showwarning("Warning", f"다운로드 완료, 핫 리로드 실패:\n{message}\n\nMSSQL 서버 재시작 필요"))
+                else:
+                    # MSSQL 서버가 실행 중이 아니면 버전만 업데이트
+                    self.root.after(0, lambda: self._update_api_version())
+                    self.root.after(0, lambda: sqlite_db.log("다운로드 완료 (MSSQL 서버 미실행)", force=True))
+                    self.root.after(0, lambda: messagebox.showinfo("Success", "enc 파일 다운로드 완료.\nMSSQL 서버 시작 시 적용됩니다."))
+
+            except Exception as e:
+                self.root.after(0, lambda: sqlite_db.log(f"오류: {str(e)}", force=True))
+                self.root.after(0, lambda: messagebox.showerror("Error", f"오류 발생:\n{str(e)}"))
+
+        threading.Thread(target=do_download, daemon=True).start()
 
     # ============ 서버 제어: Static ============
     def _start_static(self):

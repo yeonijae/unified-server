@@ -166,7 +166,6 @@ def search_patients():
     try:
         q = request.args.get('q', '')
         limit = int(request.args.get('limit', 50))
-        mssql_db.log(f"환자 검색: '{q}'")
 
         if not q or len(q) < 1:
             return jsonify([])
@@ -380,7 +379,6 @@ def today_registrations():
 def today_stats():
     """오늘 진료 통계"""
     try:
-        mssql_db.log("오늘 진료 통계 조회")
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -754,7 +752,6 @@ def create_reservation():
 
         if not data:
             return jsonify({"error": "요청 데이터가 없습니다."}), 400
-        mssql_db.log(f"예약 생성 요청: {data}")
 
         # 필수 필드 검증
         required_fields = ['patientId', 'date', 'time', 'doctor', 'item']
@@ -846,7 +843,6 @@ def create_reservation():
         created = cursor.fetchone()
         conn.close()
 
-        mssql_db.log(f"예약 생성 완료: Res_Key={new_key}")
         return jsonify(created), 201
 
     except Exception as e:
@@ -914,8 +910,6 @@ def update_reservation(reservation_id):
         if not data:
             return jsonify({"error": "수정할 데이터가 없습니다."}), 400
 
-        mssql_db.log(f"예약 수정 요청: ID={reservation_id}, data={data}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -981,7 +975,6 @@ def update_reservation(reservation_id):
         updated = cursor.fetchone()
         conn.close()
 
-        mssql_db.log(f"예약 수정 완료: Res_Key={reservation_id}")
         return jsonify(updated)
 
     except Exception as e:
@@ -993,8 +986,6 @@ def update_reservation(reservation_id):
 def cancel_reservation(reservation_id):
     """예약 취소"""
     try:
-        mssql_db.log(f"예약 취소 요청: ID={reservation_id}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -1016,7 +1007,6 @@ def cancel_reservation(reservation_id):
         conn.commit()
         conn.close()
 
-        mssql_db.log(f"예약 취소 완료: Res_Key={reservation_id}")
         return jsonify({"success": True})
 
     except Exception as e:
@@ -1032,8 +1022,6 @@ def on_site_reservation_count():
     """
     try:
         target_date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
-        mssql_db.log(f"현장예약 카운트 조회: {target_date}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -1136,8 +1124,6 @@ def daily_visits():
     """특정 날짜에 내원한 침환자(약환자 제외) 상세 목록"""
     try:
         target_date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
-        mssql_db.log(f"일일 내원환자 조회: {target_date}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -1868,8 +1854,6 @@ def get_statistics():
             start_date = target_date
             end_date = target_date
 
-        mssql_db.log(f"통계 조회: period={period}, range={start_date}~{end_date}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -2205,8 +2189,6 @@ def get_statistics2():
         else:
             start_date = target_date
             end_date = target_date
-
-        mssql_db.log(f"통계v2 조회: period={period}, range={start_date}~{end_date}")
 
         conn = mssql_db.get_connection()
         if not conn:
@@ -2550,8 +2532,6 @@ def stats_patients():
         doctor_filter = f"AND d.TxDoctor = N'{doctor}'" if doctor else ""
         doctor_filter_detail = f"AND d2.TxDoctor = N'{doctor}'" if doctor else ""
 
-        mssql_db.log(f"환자통계 조회: {start_date}~{end_date}, doctor={doctor}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -2754,8 +2734,6 @@ def stats_chuna():
 
         doctor_filter = f"AND d.TxDoctor = N'{doctor}'" if doctor else ""
 
-        mssql_db.log(f"추나통계 조회: {start_date}~{end_date}, doctor={doctor}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -2863,8 +2841,6 @@ def stats_reservations():
 
         doctor_exists_filter = f"AND EXISTS (SELECT 1 FROM Detail d2 WHERE d2.Customer_PK = r.Customer_PK AND CAST(d2.TxDate AS DATE) = CAST(r.TxDate AS DATE) AND d2.TxDoctor = N'{doctor}')" if doctor else ""
 
-        mssql_db.log(f"예약통계 조회: {start_date}~{end_date}, doctor={doctor}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -2951,8 +2927,6 @@ def stats_revenue():
             return jsonify({"error": "Invalid doctor name"}), 400
 
         doctor_exists_filter = f"AND EXISTS (SELECT 1 FROM Detail d2 WHERE d2.Customer_PK = r.Customer_PK AND CAST(d2.TxDate AS DATE) = CAST(r.TxDate AS DATE) AND d2.TxDoctor = N'{doctor}')" if doctor else ""
-
-        mssql_db.log(f"매출통계 조회: {start_date}~{end_date}, doctor={doctor}")
 
         conn = mssql_db.get_connection()
         if not conn:
@@ -3058,7 +3032,6 @@ def stats_revenue_trend():
             start_monday = end_sunday - timedelta(weeks=17, days=6)
             range_start = start_monday.strftime('%Y-%m-%d')
             range_end = end_sunday.strftime('%Y-%m-%d')
-            mssql_db.log(f"매출추이(주간) 조회: {range_start}~{range_end}")
         else:
             # 월간: 기존 로직
             end_date = dt.strptime(end_date_str[:7] + '-01', '%Y-%m-%d')
@@ -3066,8 +3039,6 @@ def stats_revenue_trend():
             range_start = start_month.strftime('%Y-%m-01')
             next_month = add_months(end_date, 1)
             range_end = (next_month - timedelta(days=1)).strftime('%Y-%m-%d')
-            mssql_db.log(f"매출추이(월간) 조회: {range_start}~{range_end}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -3198,8 +3169,6 @@ def stats_all():
         start_date, end_date, error = _get_date_range(period, target_date)
         if error:
             return jsonify({"error": error}), 400
-
-        mssql_db.log(f"통합통계 조회: {start_date}~{end_date}")
 
         conn = mssql_db.get_connection()
         if not conn:
@@ -3664,8 +3633,6 @@ def stats_uncovered_detail():
         if error:
             return jsonify({"error": error}), 400
 
-        mssql_db.log(f"비급여상세 조회: {start_date}~{end_date}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -3847,8 +3814,6 @@ def stats_visit_route():
         if error:
             return jsonify({"error": error}), 400
 
-        mssql_db.log(f"내원경로 조회(침환자): {start_date}~{end_date}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -3934,8 +3899,6 @@ def stats_search_keywords():
         start_date, end_date, error = _get_date_range(period, target_date)
         if error:
             return jsonify({"error": error}), 400
-
-        mssql_db.log(f"검색어상세 조회(침환자): {start_date}~{end_date}")
 
         conn = mssql_db.get_connection()
         if not conn:
@@ -4061,7 +4024,6 @@ def stats_visit_route_trend():
             range_start = start_monday.strftime('%Y-%m-%d')
             range_end = end_sunday.strftime('%Y-%m-%d')
             group_format = "CAST(YEAR(DATEADD(DAY, 26 - DATEPART(iso_week, c.reg_date), c.reg_date)) AS VARCHAR) + '-W' + RIGHT('0' + CAST(DATEPART(iso_week, c.reg_date) AS VARCHAR), 2)"
-            mssql_db.log(f"침초진추이(주간) 조회: {range_start}~{range_end}")
         else:
             end_date = dt.strptime(end_date_str[:7] + '-01', '%Y-%m-%d')
             start_month = add_months(end_date, -17)
@@ -4069,8 +4031,6 @@ def stats_visit_route_trend():
             next_month = add_months(end_date, 1)
             range_end = (next_month - timedelta(days=1)).strftime('%Y-%m-%d')
             group_format = "FORMAT(c.reg_date, 'yyyy-MM')"
-            mssql_db.log(f"침초진추이(월간) 조회: {range_start}~{range_end}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -4198,12 +4158,9 @@ def stats_chim_patient_trend():
             days_until_sunday = 6 - end_date.weekday()
             end_sunday = end_date + timedelta(days=days_until_sunday)
             start_monday = end_sunday - timedelta(weeks=17, days=6)
-            mssql_db.log(f"침환자추이(주간) 조회: {start_monday.strftime('%Y-%m-%d')}~{end_sunday.strftime('%Y-%m-%d')}")
         else:
             end_date = dt.strptime(end_date_str[:7] + '-01', '%Y-%m-%d')
             start_month = add_months(end_date, -17)
-            mssql_db.log(f"침환자추이(월간) 조회: {start_month.strftime('%Y-%m')}~{end_date.strftime('%Y-%m')}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -4366,8 +4323,6 @@ def stats_yak_chojin_detail():
         start_date, end_date, error = _get_date_range(period, target_date)
         if error:
             return jsonify({"error": error}), 400
-
-        mssql_db.log(f"약초진상세 조회: {start_date}~{end_date}")
 
         conn = mssql_db.get_connection()
         if not conn:
@@ -4647,8 +4602,6 @@ def stats_yak_chojin_raw():
         start_date, end_date, error = _get_date_range(period, target_date)
         if error:
             return jsonify({"error": error}), 400
-
-        mssql_db.log(f"약초진Raw 조회: {start_date}~{end_date}, doctor={doctor}, category={category}")
 
         conn = mssql_db.get_connection()
         if not conn:
@@ -4988,7 +4941,6 @@ def stats_yak_chojin_trend():
             range_start = start_monday.strftime('%Y-%m-%d')
             range_end = end_sunday.strftime('%Y-%m-%d')
             group_format = "CAST(YEAR(DATEADD(DAY, 26 - DATEPART(iso_week, d.TxDate), d.TxDate)) AS VARCHAR) + '-W' + RIGHT('0' + CAST(DATEPART(iso_week, d.TxDate) AS VARCHAR), 2)"
-            mssql_db.log(f"약초진추이(주간) 조회: {range_start}~{range_end}")
         else:
             end_date = dt.strptime(end_date_str[:7] + '-01', '%Y-%m-%d')
             start_month = add_months(end_date, -17)
@@ -4996,8 +4948,6 @@ def stats_yak_chojin_trend():
             next_month = add_months(end_date, 1)
             range_end = (next_month - timedelta(days=1)).strftime('%Y-%m-%d')
             group_format = "FORMAT(MIN(CAST(d.TxDate AS DATE)), 'yyyy-MM')"
-            mssql_db.log(f"약초진추이(월간) 조회: {range_start}~{range_end}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -5232,7 +5182,6 @@ def stats_uncovered_trend():
             range_start = start_monday.strftime('%Y-%m-%d')
             range_end = end_sunday.strftime('%Y-%m-%d')
             group_format = "CAST(YEAR(DATEADD(DAY, 26 - DATEPART(iso_week, d.TxDate), d.TxDate)) AS VARCHAR) + '-W' + RIGHT('0' + CAST(DATEPART(iso_week, d.TxDate) AS VARCHAR), 2)"
-            mssql_db.log(f"비급여추이(주간) 조회: {range_start}~{range_end}")
         else:
             start_date = add_months(end_date, -17)
             start_date = start_date.replace(day=1)
@@ -5240,8 +5189,6 @@ def stats_uncovered_trend():
             next_month = add_months(end_date.replace(day=1), 1)
             range_end = (next_month - timedelta(days=1)).strftime('%Y-%m-%d')
             group_format = "FORMAT(d.TxDate, 'yyyy-MM')"
-            mssql_db.log(f"비급여추이(월간) 조회: {range_start}~{range_end}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
@@ -5405,8 +5352,6 @@ def stats_all_trends():
         range_start = start_month.strftime('%Y-%m-01')
         next_month = add_months(end_date, 1)
         range_end = (next_month - timedelta(days=1)).strftime('%Y-%m-%d')
-
-        mssql_db.log(f"통합추이 조회: {range_start}~{range_end}")
 
         conn = mssql_db.get_connection()
         if not conn:
@@ -5757,8 +5702,6 @@ def execute():
     try:
         data = request.get_json()
         sql_query = data.get('sql', '').strip()
-        mssql_db.log(f"SQL 실행: {sql_query[:50]}...")
-
         if not sql_query:
             return jsonify({"error": "SQL query is required"}), 400
 
@@ -5980,15 +5923,12 @@ def stats_doctor_revenue_trend():
             start_monday = end_sunday - timedelta(weeks=17, days=6)
             range_start = start_monday.strftime('%Y-%m-%d')
             range_end = end_sunday.strftime('%Y-%m-%d')
-            mssql_db.log(f"원장매출추이(주간) 조회: {doctor}, {range_start}~{range_end}")
         else:
             end_date = dt.strptime(end_date_str[:7] + '-01', '%Y-%m-%d')
             start_month = add_months(end_date, -17)
             range_start = start_month.strftime('%Y-%m-01')
             next_month = add_months(end_date, 1)
             range_end = (next_month - timedelta(days=1)).strftime('%Y-%m-%d')
-            mssql_db.log(f"원장매출추이(월간) 조회: {doctor}, {range_start}~{range_end}")
-
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
