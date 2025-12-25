@@ -31,9 +31,14 @@ file_bp = Blueprint('files', __name__)
 _config = load_config()
 BASE_UPLOAD_DIR = _config.get("upload_folder", "C:/haniwon_data/uploads")
 THUMBNAIL_DIR = _config.get("thumbnail_folder", "C:/haniwon_data/thumbnails")
-ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'pdf', 'bmp', 'tiff', 'tif'}
-ALLOWED_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif'}
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+
+# 허용 확장자 (config에서 로드)
+_allowed_ext_str = _config.get("allowed_extensions", "jpg,jpeg,png,gif,pdf,bmp,tiff,tif")
+ALLOWED_EXTENSIONS = set(ext.strip().lower() for ext in _allowed_ext_str.split(","))
+ALLOWED_IMAGE_EXTENSIONS = ALLOWED_EXTENSIONS & {'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif'}
+
+# 최대 파일 크기 (config에서 로드)
+MAX_FILE_SIZE = _config.get("max_file_size_mb", 20) * 1024 * 1024
 THUMBNAIL_SIZE = (200, 200)
 
 

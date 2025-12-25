@@ -80,6 +80,7 @@ class UnifiedServerGUI:
         self._create_static_tab(notebook)
         self._create_mssql_tab(notebook)
         self._create_sqlite_tab(notebook)
+        self._create_upload_tab(notebook)
         self._create_webhook_tab(notebook)
 
         # 하단 버전 (EXE 버전만 표시, API 버전은 MSSQL 탭에서 표시)
@@ -339,6 +340,93 @@ class UnifiedServerGUI:
         log_btn_row.pack(fill=tk.X, pady=(3, 0))
         ttk.Button(log_btn_row, text="Clear", command=lambda: self._clear_log(self.sqlite_log)).pack(side=tk.RIGHT)
         ttk.Button(log_btn_row, text="Save Settings", command=self._save_sqlite_settings).pack(side=tk.RIGHT, padx=5)
+
+    # ============ Upload 탭 ============
+    def _create_upload_tab(self, notebook):
+        tab = ttk.Frame(notebook, padding=10)
+        notebook.add(tab, text=" Upload ")
+
+        # Upload 폴더 설정
+        upload_frame = ttk.LabelFrame(tab, text="Upload Folder", padding=8)
+        upload_frame.pack(fill=tk.X, pady=(0, 10))
+
+        upload_row = ttk.Frame(upload_frame)
+        upload_row.pack(fill=tk.X)
+        self.upload_folder_var = tk.StringVar(value=self.config.get("upload_folder", "C:/haniwon_data/uploads"))
+        ttk.Entry(upload_row, textvariable=self.upload_folder_var, width=45).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(upload_row, text="Browse", command=self._browse_upload_folder).pack(side=tk.LEFT)
+
+        ttk.Label(upload_frame, text="검사결과 이미지, PDF 등이 저장되는 폴더", foreground="gray").pack(anchor=tk.W, pady=(5, 0))
+
+        # Thumbnail 폴더 설정
+        thumb_frame = ttk.LabelFrame(tab, text="Thumbnail Folder", padding=8)
+        thumb_frame.pack(fill=tk.X, pady=(0, 10))
+
+        thumb_row = ttk.Frame(thumb_frame)
+        thumb_row.pack(fill=tk.X)
+        self.thumbnail_folder_var = tk.StringVar(value=self.config.get("thumbnail_folder", "C:/haniwon_data/thumbnails"))
+        ttk.Entry(thumb_row, textvariable=self.thumbnail_folder_var, width=45).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(thumb_row, text="Browse", command=self._browse_thumbnail_folder).pack(side=tk.LEFT)
+
+        ttk.Label(thumb_frame, text="이미지 썸네일이 저장되는 폴더", foreground="gray").pack(anchor=tk.W, pady=(5, 0))
+
+        # 파일 설정
+        file_settings_frame = ttk.LabelFrame(tab, text="File Settings", padding=8)
+        file_settings_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # 최대 파일 크기
+        size_row = ttk.Frame(file_settings_frame)
+        size_row.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(size_row, text="Max File Size (MB):").pack(side=tk.LEFT)
+        self.max_file_size_var = tk.IntVar(value=self.config.get("max_file_size_mb", 20))
+        ttk.Spinbox(size_row, from_=1, to=100, textvariable=self.max_file_size_var, width=10).pack(side=tk.LEFT, padx=5)
+
+        # 허용 확장자
+        ext_row = ttk.Frame(file_settings_frame)
+        ext_row.pack(fill=tk.X)
+        ttk.Label(ext_row, text="Allowed Extensions:").pack(side=tk.LEFT)
+        default_ext = self.config.get("allowed_extensions", "jpg,jpeg,png,gif,pdf,bmp,tiff,tif")
+        self.allowed_ext_var = tk.StringVar(value=default_ext)
+        ttk.Entry(ext_row, textvariable=self.allowed_ext_var, width=40).pack(side=tk.LEFT, padx=5)
+
+        # API 정보
+        api_frame = ttk.LabelFrame(tab, text="File API Endpoints (SQLite Server)", padding=8)
+        api_frame.pack(fill=tk.X, pady=(0, 10))
+
+        port = self.config.get("sqlite_api_port", 3200)
+        endpoints = [
+            ("POST", f"/api/files/upload", "파일 업로드"),
+            ("GET", f"/api/files/<path>", "파일 다운로드"),
+            ("DELETE", f"/api/files/<path>", "파일 삭제"),
+            ("GET", f"/api/files/list/<path>", "폴더 목록"),
+        ]
+        for method, path, desc in endpoints:
+            row = ttk.Frame(api_frame)
+            row.pack(fill=tk.X, pady=1)
+            ttk.Label(row, text=method, width=8, foreground="green").pack(side=tk.LEFT)
+            ttk.Label(row, text=path, foreground="blue").pack(side=tk.LEFT, padx=5)
+            ttk.Label(row, text=f"- {desc}", foreground="gray").pack(side=tk.LEFT)
+
+        # 저장 버튼
+        ttk.Button(tab, text="Save Upload Settings", command=self._save_upload_settings).pack(pady=20)
+
+    def _browse_upload_folder(self):
+        folder = filedialog.askdirectory(initialdir=self.upload_folder_var.get())
+        if folder:
+            self.upload_folder_var.set(folder)
+
+    def _browse_thumbnail_folder(self):
+        folder = filedialog.askdirectory(initialdir=self.thumbnail_folder_var.get())
+        if folder:
+            self.thumbnail_folder_var.set(folder)
+
+    def _save_upload_settings(self):
+        self.config["upload_folder"] = self.upload_folder_var.get()
+        self.config["thumbnail_folder"] = self.thumbnail_folder_var.get()
+        self.config["max_file_size_mb"] = self.max_file_size_var.get()
+        self.config["allowed_extensions"] = self.allowed_ext_var.get()
+        save_config(self.config)
+        messagebox.showinfo("Saved", "Upload settings saved!")
 
     # ============ Webhook 탭 ============
     def _create_webhook_tab(self, notebook):
