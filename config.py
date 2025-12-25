@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "2.5.5"  # file_routes 추가
+APP_VERSION = "2.5.6"  # file upload 경로 설정 가능
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
@@ -58,7 +58,11 @@ DEFAULT_CONFIG = {
     "last_backup": "",
 
     # Windows
-    "start_with_windows": False
+    "start_with_windows": False,
+
+    # File Upload
+    "upload_folder": "C:/haniwon_data/uploads",
+    "thumbnail_folder": "C:/haniwon_data/thumbnails"
 }
 
 

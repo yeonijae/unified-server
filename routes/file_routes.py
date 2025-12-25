@@ -15,6 +15,7 @@ from flask import Blueprint, request, jsonify, send_file, make_response
 import os
 import uuid
 from datetime import datetime
+from config import load_config
 
 # PIL은 선택적 - 없으면 썸네일 생성 안함
 try:
@@ -26,9 +27,10 @@ except ImportError:
 
 file_bp = Blueprint('files', __name__)
 
-# 저장 경로 설정
-BASE_UPLOAD_DIR = "C:/haniwon_data/uploads"
-THUMBNAIL_DIR = "C:/haniwon_data/thumbnails"
+# 저장 경로 설정 (config에서 로드)
+_config = load_config()
+BASE_UPLOAD_DIR = _config.get("upload_folder", "C:/haniwon_data/uploads")
+THUMBNAIL_DIR = _config.get("thumbnail_folder", "C:/haniwon_data/thumbnails")
 ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'pdf', 'bmp', 'tiff', 'tif'}
 ALLOWED_IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif'}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
