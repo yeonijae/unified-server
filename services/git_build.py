@@ -344,10 +344,8 @@ def git_fetch_single_file(file_name, callback=None):
         )
 
         if result.returncode != 0:
-            mssql_log(f"git fetch 실패: {result.stderr}")
-            if callback:
-                callback(False, f"Fetch failed: {result.stderr[:100]}")
-            return False, False
+            mssql_log(f"git fetch 실패: {result.stderr.strip()}, HTTP fallback...")
+            return download_enc_from_github_http(callback)
 
         # 특정 파일만 checkout
         mssql_log(f"git checkout origin/{GITHUB_BRANCH} -- {file_name}")
@@ -364,10 +362,8 @@ def git_fetch_single_file(file_name, callback=None):
         )
 
         if result.returncode != 0:
-            mssql_log(f"git checkout 실패: {result.stderr}")
-            if callback:
-                callback(False, f"Checkout failed: {result.stderr[:100]}")
-            return False, False
+            mssql_log(f"git checkout 실패: {result.stderr.strip()}, HTTP fallback...")
+            return download_enc_from_github_http(callback)
 
         # 변경 여부 확인
         new_content = None
