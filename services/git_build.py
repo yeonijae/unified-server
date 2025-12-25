@@ -316,8 +316,88 @@ def mssql_log(message):
         mssql_log_callback(log_msg)
 
 
-def download_enc_from_github(callback=None):
-    """GitHub에서 mssql_routes.enc 직접 다운로드"""
+def git_fetch_single_file(file_name, callback=None):
+    """git fetch 후 특정 파일만 checkout (다른 파일에 영향 없음)"""
+    try:
+        git_cmd = get_git_command()
+        git_env = get_git_env()
+        target_path = APP_DIR / file_name
+
+        # 기존 파일 내용 저장 (비교용)
+        old_content = None
+        if target_path.exists():
+            with open(target_path, 'rb') as f:
+                old_content = f.read()
+
+        mssql_log("git fetch origin main...")
+        if callback:
+            callback(None, "Fetching from GitHub...")
+
+        # git fetch
+        result = subprocess.run(
+            [git_cmd, "fetch", "origin", GITHUB_BRANCH],
+            cwd=str(APP_DIR),
+            capture_output=True,
+            text=True,
+            env=git_env,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        )
+
+        if result.returncode != 0:
+            mssql_log(f"git fetch 실패: {result.stderr}")
+            if callback:
+                callback(False, f"Fetch failed: {result.stderr[:100]}")
+            return False, False
+
+        # 특정 파일만 checkout
+        mssql_log(f"git checkout origin/{GITHUB_BRANCH} -- {file_name}")
+        if callback:
+            callback(None, f"Checking out {file_name}...")
+
+        result = subprocess.run(
+            [git_cmd, "checkout", f"origin/{GITHUB_BRANCH}", "--", file_name],
+            cwd=str(APP_DIR),
+            capture_output=True,
+            text=True,
+            env=git_env,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+        )
+
+        if result.returncode != 0:
+            mssql_log(f"git checkout 실패: {result.stderr}")
+            if callback:
+                callback(False, f"Checkout failed: {result.stderr[:100]}")
+            return False, False
+
+        # 변경 여부 확인
+        new_content = None
+        if target_path.exists():
+            with open(target_path, 'rb') as f:
+                new_content = f.read()
+
+        has_changes = (old_content != new_content)
+
+        if has_changes:
+            mssql_log(f"파일 업데이트 완료: {file_name}")
+            if callback:
+                callback(True, f"Updated {file_name}")
+            return True, True
+        else:
+            mssql_log("변경사항 없음")
+            if callback:
+                callback(True, "No changes")
+            return True, False
+
+    except FileNotFoundError:
+        mssql_log("Git을 찾을 수 없음, HTTP 다운로드로 전환...")
+        return download_enc_from_github_http(callback)
+    except Exception as e:
+        mssql_log(f"git 오류: {e}, HTTP 다운로드로 전환...")
+        return download_enc_from_github_http(callback)
+
+
+def download_enc_from_github_http(callback=None):
+    """GitHub에서 mssql_routes.enc 직접 다운로드 (git 없을 때 fallback)"""
     import urllib.request
     import ssl
 
@@ -325,18 +405,15 @@ def download_enc_from_github(callback=None):
     target_path = APP_DIR / GITHUB_FILE
 
     try:
-        mssql_log(f"GitHub에서 다운로드: {url}")
+        mssql_log(f"HTTP 다운로드: {url}")
         if callback:
-            callback(None, f"Downloading {GITHUB_FILE} from GitHub...")
+            callback(None, f"Downloading {GITHUB_FILE} via HTTP...")
 
-        # SSL 컨텍스트 (인증서 검증)
         context = ssl.create_default_context()
 
-        # 다운로드
         with urllib.request.urlopen(url, context=context, timeout=30) as response:
             new_content = response.read()
 
-        # 기존 파일과 비교
         has_changes = True
         if target_path.exists():
             with open(target_path, 'rb') as f:
@@ -344,13 +421,12 @@ def download_enc_from_github(callback=None):
             has_changes = (old_content != new_content)
 
         if has_changes:
-            # 새 파일 저장
             with open(target_path, 'wb') as f:
                 f.write(new_content)
             mssql_log(f"다운로드 완료: {len(new_content)} bytes")
             if callback:
                 callback(True, f"Downloaded {len(new_content)} bytes")
-            return True, True  # success, has_changes
+            return True, True
         else:
             mssql_log("변경사항 없음")
             if callback:
@@ -365,7 +441,7 @@ def download_enc_from_github(callback=None):
 
 
 def handle_self_update(callback=None):
-    """unified-server 자체 업데이트: GitHub에서 .enc 다운로드 후 핫 리로드 (재시작 없음)"""
+    """unified-server 자체 업데이트: mssql_routes.enc만 git checkout 후 핫 리로드"""
     global last_self_update_time
 
     last_self_update_time = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -374,14 +450,14 @@ def handle_self_update(callback=None):
         callback(None, f"Self-update webhook received at {last_self_update_time}")
     mssql_log(f"Self-update 수신: {last_self_update_time}")
 
-    # GitHub CDN 캐시 갱신 대기 (5초)
-    mssql_log("GitHub 캐시 갱신 대기 중... (5초)")
+    # GitHub 캐시 갱신 대기 (3초)
+    mssql_log("GitHub 동기화 대기 중... (3초)")
     if callback:
-        callback(None, "Waiting for GitHub CDN cache update... (5s)")
-    time.sleep(5)
+        callback(None, "Waiting for GitHub sync... (3s)")
+    time.sleep(3)
 
-    # GitHub에서 enc 파일 다운로드
-    success, has_changes = download_enc_from_github(callback)
+    # mssql_routes.enc만 fetch + checkout (다른 파일에 영향 없음)
+    success, has_changes = git_fetch_single_file(GITHUB_FILE, callback)
 
     if success and has_changes:
         if callback:
