@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "2.5.7"  # Upload 탭 GUI 추가
+APP_VERSION = "2.5.8"  # SQLite INSERT lastrowid 응답 추가
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)

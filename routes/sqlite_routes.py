@@ -358,10 +358,12 @@ def execute():
         else:
             conn.commit()
             affected = cursor.rowcount
+            last_id = cursor.lastrowid
             conn.close()
             return json_response({
                 "success": True,
                 "affected_rows": affected,
+                "lastrowid": last_id,
                 "message": f"Query executed. {affected} rows affected."
             })
     except Exception as e:
