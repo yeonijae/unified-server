@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "2.5.4"  # 작동하는 EXE 소스로 복원
+APP_VERSION = "2.5.5"  # file_routes 추가
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
