@@ -1,6 +1,23 @@
-# 모든 파일 제외
-*
+# Python
+__pycache__/
+*.pyc
+*.pyo
 
-# mssql_routes.enc만 포함
-!mssql_routes.enc
-!.gitignore
+# PyInstaller
+build/
+dist/
+*.spec
+
+# 설정 파일 (민감 정보)
+config.json
+config.enc
+*.sqlite
+
+# 백업 폴더
+*_backup/
+
+# 임시/테스트 파일
+query_*.py
+test-*.py
+check-*.js
+check-*.cjs
