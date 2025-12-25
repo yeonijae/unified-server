@@ -753,6 +753,7 @@ class UnifiedServerGUI:
         from flask import Flask
         from flask_cors import CORS
         from routes.sqlite_routes import sqlite_bp
+        from routes.file_routes import file_bp
 
         db_path = self.sqlite_path_var.get()
         if not db_path:
@@ -778,6 +779,7 @@ class UnifiedServerGUI:
             }
         })
         self.sqlite_app.register_blueprint(sqlite_bp)
+        self.sqlite_app.register_blueprint(file_bp)
 
         def run():
             self.sqlite_running = True
