@@ -871,10 +871,10 @@ class UnifiedServerGUI:
 
         def run():
             self.sqlite_running = True
-            sqlite_db.log(f"DB: {db_path}")
+            sqlite_db.log(f"DB: {db_path}", force=True)
             try:
                 from waitress import serve
-                sqlite_db.log(f"Waitress 서버 시작 (포트: {port})")
+                sqlite_db.log(f"Waitress 서버 시작 (포트: {port})", force=True)
                 serve(
                     self.sqlite_app,
                     host='0.0.0.0',
@@ -886,7 +886,7 @@ class UnifiedServerGUI:
                     ident='Haniwon-SQLite'
                 )
             except ImportError:
-                sqlite_db.log(f"Flask 서버 시작 (포트: {port}) - Waitress 미설치")
+                sqlite_db.log(f"Flask 서버 시작 (포트: {port}) - Waitress 미설치", force=True)
                 self.sqlite_app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
 
         threading.Thread(target=run, daemon=True).start()
@@ -900,7 +900,7 @@ class UnifiedServerGUI:
 
     def _stop_sqlite(self):
         self.sqlite_running = False
-        sqlite_db.log("서버 중지됨")
+        sqlite_db.log("서버 중지됨", force=True)
         self.sqlite_status_var.set("Stopped")
         self.sqlite_status_label.configure(foreground="orange")
         self.sqlite_start_btn.configure(state=tk.NORMAL)
@@ -942,7 +942,7 @@ class UnifiedServerGUI:
         if not messagebox.askyesno("Confirm", f"SQL 파일을 실행하시겠습니까?\n\n파일: {Path(sql_file).name}\n문장 수: {stmt_count}개"):
             return
 
-        sqlite_db.log(f"SQL 실행 시작: {stmt_count}개 문장")
+        sqlite_db.log(f"SQL 실행 시작: {stmt_count}개 문장", force=True)
 
         try:
             conn = sqlite3.connect(db_path)
@@ -961,11 +961,11 @@ class UnifiedServerGUI:
             conn.commit()
             conn.close()
 
-            sqlite_db.log(f"완료: 성공 {success_count}, 실패 {error_count}")
+            sqlite_db.log(f"완료: 성공 {success_count}, 실패 {error_count}", force=True)
             messagebox.showinfo("SQL 실행 완료", f"성공: {success_count}개\n실패: {error_count}개")
 
         except Exception as e:
-            sqlite_db.log(f"[ERROR] {str(e)}")
+            sqlite_db.log(f"[ERROR] {str(e)}", force=True)
             messagebox.showerror("Error", str(e))
 
     def _save_sqlite_settings(self):
@@ -1005,7 +1005,7 @@ class UnifiedServerGUI:
                 self.sqlite_path_var.set(str(DEFAULT_DB_FILE))
 
             if self.sqlite_path_var.get():
-                sqlite_db.log("자동 시작")
+                sqlite_db.log("자동 시작", force=True)
                 self._start_sqlite()
                 any_auto_started = True
 

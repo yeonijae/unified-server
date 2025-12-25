@@ -252,7 +252,6 @@ def get_tables():
         return cors_preflight_response()
 
     try:
-        sqlite_db.log("테이블 목록 조회")
         db_path = sqlite_db.get_db_path()
         if not db_path:
             return json_response({"tables": [], "error": "SQLite DB not configured"})
@@ -336,7 +335,6 @@ def execute():
 
         data = request.get_json()
         sql_query = data.get('sql', '').strip()
-        sqlite_db.log(f"SQL 실행: {sql_query[:50]}...")
 
         if not sql_query:
             return json_response({"error": "SQL query is required"}, 400)
@@ -412,7 +410,6 @@ def insert_row(name):
         last_id = cursor.lastrowid
         conn.close()
 
-        sqlite_db.log(f"INSERT INTO {name}: {last_id}")
         return json_response({
             "success": True,
             "id": last_id,
@@ -446,7 +443,6 @@ def update_row(name):
         affected = cursor.rowcount
         conn.close()
 
-        sqlite_db.log(f"UPDATE {name}: {affected} rows")
         return json_response({
             "success": True,
             "affected_rows": affected,
@@ -479,7 +475,6 @@ def delete_row(name):
         affected = cursor.rowcount
         conn.close()
 
-        sqlite_db.log(f"DELETE FROM {name}: {affected} rows")
         return json_response({
             "success": True,
             "affected_rows": affected,
