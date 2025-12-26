@@ -82,6 +82,7 @@ class UnifiedServerGUI:
         self._create_sqlite_tab(notebook)
         self._create_upload_tab(notebook)
         self._create_webhook_tab(notebook)
+        self._create_apikey_tab(notebook)
 
         # 하단 버전 (EXE 버전만 표시, API 버전은 MSSQL 탭에서 표시)
         ttk.Label(self.root, text=f"Server v{APP_VERSION}", foreground="gray").pack(side=tk.BOTTOM, pady=3)
@@ -476,6 +477,69 @@ class UnifiedServerGUI:
 
         # 저장 버튼
         ttk.Button(tab, text="Save Webhook Settings", command=self._save_webhook_settings).pack(pady=20)
+
+    # ============ API Keys 탭 ============
+    def _create_apikey_tab(self, notebook):
+        tab = ttk.Frame(notebook, padding=10)
+        notebook.add(tab, text=" API Keys ")
+
+        # 설명
+        desc_label = ttk.Label(tab, text="AI 서비스 API 키 설정 (암호화하여 저장됩니다)", foreground="gray")
+        desc_label.pack(anchor=tk.W, pady=(0, 10))
+
+        # OpenAI (GPT) API Key
+        gpt_frame = ttk.LabelFrame(tab, text="OpenAI (GPT / Whisper)", padding=8)
+        gpt_frame.pack(fill=tk.X, pady=(0, 10))
+
+        gpt_row = ttk.Frame(gpt_frame)
+        gpt_row.pack(fill=tk.X)
+        ttk.Label(gpt_row, text="API Key:").pack(side=tk.LEFT)
+        self.openai_key_var = tk.StringVar(value=self.config.get("openai_api_key", ""))
+        self.openai_key_entry = ttk.Entry(gpt_row, textvariable=self.openai_key_var, width=45, show="*")
+        self.openai_key_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Button(gpt_row, text="Show", command=lambda: self._toggle_key_visibility(self.openai_key_entry)).pack(side=tk.LEFT)
+
+        gpt_hint = ttk.Label(gpt_frame, text="sk-... 또는 sk-proj-... 형식", foreground="gray")
+        gpt_hint.pack(anchor=tk.W, pady=(5, 0))
+
+        # Google Gemini API Key
+        gemini_frame = ttk.LabelFrame(tab, text="Google Gemini", padding=8)
+        gemini_frame.pack(fill=tk.X, pady=(0, 10))
+
+        gemini_row = ttk.Frame(gemini_frame)
+        gemini_row.pack(fill=tk.X)
+        ttk.Label(gemini_row, text="API Key:").pack(side=tk.LEFT)
+        self.gemini_key_var = tk.StringVar(value=self.config.get("gemini_api_key", ""))
+        self.gemini_key_entry = ttk.Entry(gemini_row, textvariable=self.gemini_key_var, width=45, show="*")
+        self.gemini_key_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Button(gemini_row, text="Show", command=lambda: self._toggle_key_visibility(self.gemini_key_entry)).pack(side=tk.LEFT)
+
+        gemini_hint = ttk.Label(gemini_frame, text="AIza... 형식 (Google AI Studio에서 발급)", foreground="gray")
+        gemini_hint.pack(anchor=tk.W, pady=(5, 0))
+
+        # 저장 버튼
+        btn_frame = ttk.Frame(tab)
+        btn_frame.pack(pady=20)
+        ttk.Button(btn_frame, text="Save API Keys", command=self._save_api_keys).pack()
+
+        # 상태 표시
+        self.apikey_status_label = ttk.Label(tab, text="", foreground="green")
+        self.apikey_status_label.pack()
+
+    def _toggle_key_visibility(self, entry_widget):
+        """API 키 표시/숨김 토글"""
+        if entry_widget.cget("show") == "*":
+            entry_widget.configure(show="")
+        else:
+            entry_widget.configure(show="*")
+
+    def _save_api_keys(self):
+        """API 키 저장"""
+        self.config["openai_api_key"] = self.openai_key_var.get().strip()
+        self.config["gemini_api_key"] = self.gemini_key_var.get().strip()
+        save_config(self.config)
+        self.apikey_status_label.configure(text="저장 완료!", foreground="green")
+        self.root.after(3000, lambda: self.apikey_status_label.configure(text=""))
 
     # ============ 로그 콜백 설정 ============
     def _setup_log_callbacks(self):
