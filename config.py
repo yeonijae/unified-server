@@ -62,7 +62,10 @@ DEFAULT_CONFIG = {
 
     # File Upload
     "upload_folder": "C:/haniwon_data/uploads",
-    "thumbnail_folder": "C:/haniwon_data/thumbnails"
+    "thumbnail_folder": "C:/haniwon_data/thumbnails",
+
+    # OpenAI API (Whisper 등)
+    "openai_api_key": ""
 }
 
 

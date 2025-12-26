@@ -3,10 +3,13 @@ SQLite API 라우트
 - 테이블 관리
 - SQL 실행
 - 백업
+- Whisper 음성→텍스트 변환
 
 CORS Preflight (OPTIONS) 요청을 명시적으로 처리
 """
 
+import os
+import tempfile
 from flask import Blueprint, request, jsonify, Response, make_response
 from services import sqlite_db
 from config import VERSION, load_config
@@ -482,3 +485,99 @@ def delete_row(name):
         })
     except Exception as e:
         return json_response({"error": str(e)}, 400)
+
+
+# ============ Whisper 음성→텍스트 변환 ============
+
+@sqlite_bp.route('/api/whisper/transcribe', methods=['POST', 'OPTIONS'])
+def whisper_transcribe():
+    """OpenAI Whisper API로 음성→텍스트 변환
+
+    Request:
+        - audio: 오디오 파일 (multipart/form-data)
+        - language: 언어 코드 (기본: ko)
+        - prompt: 문맥 힌트 (선택)
+
+    Response:
+        - transcript: 변환된 텍스트
+        - duration: 오디오 길이 (초)
+    """
+    if request.method == 'OPTIONS':
+        return cors_preflight_response()
+
+    try:
+        # OpenAI API 키 확인
+        config = load_config()
+        api_key = config.get('openai_api_key') or os.environ.get('OPENAI_API_KEY')
+
+        if not api_key:
+            return json_response({
+                "error": "OpenAI API key not configured. Set 'openai_api_key' in config or OPENAI_API_KEY env var."
+            }, 400)
+
+        # 파일 확인
+        if 'audio' not in request.files:
+            return json_response({"error": "No audio file provided"}, 400)
+
+        audio_file = request.files['audio']
+        if audio_file.filename == '':
+            return json_response({"error": "No audio file selected"}, 400)
+
+        # 파라미터
+        language = request.form.get('language', 'ko')
+        prompt = request.form.get('prompt', '')
+
+        # 임시 파일로 저장
+        suffix = os.path.splitext(audio_file.filename)[1] or '.webm'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            audio_file.save(tmp.name)
+            tmp_path = tmp.name
+
+        try:
+            # OpenAI API 호출
+            import requests as req
+
+            with open(tmp_path, 'rb') as f:
+                response = req.post(
+                    'https://api.openai.com/v1/audio/transcriptions',
+                    headers={
+                        'Authorization': f'Bearer {api_key}'
+                    },
+                    files={
+                        'file': (audio_file.filename or 'audio.webm', f, 'audio/webm')
+                    },
+                    data={
+                        'model': 'whisper-1',
+                        'language': language,
+                        'prompt': prompt,
+                        'response_format': 'verbose_json'
+                    }
+                )
+
+            if response.status_code != 200:
+                error_msg = response.json().get('error', {}).get('message', 'Unknown error')
+                return json_response({
+                    "error": f"Whisper API error: {error_msg}"
+                }, response.status_code)
+
+            result = response.json()
+
+            return json_response({
+                "success": True,
+                "transcript": result.get('text', ''),
+                "duration": result.get('duration', 0),
+                "language": result.get('language', language)
+            })
+
+        finally:
+            # 임시 파일 삭제
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    except ImportError:
+        return json_response({
+            "error": "requests library not installed. Run: pip install requests"
+        }, 500)
+    except Exception as e:
+        sqlite_db.log(f"Whisper 오류: {str(e)}")
+        return json_response({"error": str(e)}, 500)
