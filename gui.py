@@ -1122,7 +1122,7 @@ class UnifiedServerGUI:
             self.waiting_sync_thread = None
 
     def _waiting_sync_loop(self):
-        """10초마다 MSSQL Waiting을 SQLite에 동기화"""
+        """10초마다 MSSQL Waiting + Treating을 SQLite에 동기화"""
         import time
         import requests
 
@@ -1136,7 +1136,7 @@ class UnifiedServerGUI:
                 mssql_port = self.mssql_port_var.get()
                 sqlite_port = self.sqlite_port_var.get()
 
-                # 1. MSSQL에서 대기 목록 가져오기
+                # 1. MSSQL에서 대기 + 치료실 목록 가져오기
                 try:
                     mssql_res = requests.get(
                         f"http://localhost:{mssql_port}/api/queue/status",
@@ -1148,14 +1148,24 @@ class UnifiedServerGUI:
 
                     queue_data = mssql_res.json()
                     waiting_list = queue_data.get('waiting', [])
+                    treating_list = queue_data.get('treating', [])
+
+                    # treating 데이터를 waiting 형식에 맞게 변환
+                    for t in treating_list:
+                        # treating_since -> waiting_since로 변환
+                        if 'treating_since' in t and 'waiting_since' not in t:
+                            t['waiting_since'] = t['treating_since']
+
+                    # 두 목록 합치기
+                    combined_list = waiting_list + treating_list
 
                 except requests.exceptions.RequestException:
                     # MSSQL 연결 실패 - 조용히 다음 시도
                     time.sleep(10)
                     continue
 
-                # 대기 목록이 비어있으면 동기화 스킵 (SQLite 유지)
-                if not waiting_list:
+                # 목록이 비어있으면 동기화 스킵 (SQLite 유지)
+                if not combined_list:
                     time.sleep(10)
                     continue
 
@@ -1163,7 +1173,7 @@ class UnifiedServerGUI:
                 try:
                     sync_res = requests.post(
                         f"http://localhost:{sqlite_port}/api/waiting-queue/sync",
-                        json={"waiting": waiting_list},
+                        json={"waiting": combined_list},
                         timeout=5
                     )
 

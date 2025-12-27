@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "3.0.0"  # MSSQL → SQLite 대기열 자동 동기화
+APP_VERSION = "3.0.1"  # MSSQL 치료대기+치료실 → SQLite 대기열 동기화
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
