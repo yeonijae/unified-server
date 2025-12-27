@@ -1113,7 +1113,7 @@ class UnifiedServerGUI:
         self.waiting_sync_running = True
         self.waiting_sync_thread = threading.Thread(target=self._waiting_sync_loop, daemon=True)
         self.waiting_sync_thread.start()
-        sqlite_db.log("대기열 동기화 시작 (10초 간격)", force=True)
+        sqlite_db.log("대기열 동기화 시작 (5초 간격)", force=True)
 
     def _stop_waiting_sync(self):
         """동기화 중지"""
@@ -1122,7 +1122,11 @@ class UnifiedServerGUI:
             self.waiting_sync_thread = None
 
     def _waiting_sync_loop(self):
-        """10초마다 MSSQL Waiting + Treating을 SQLite에 동기화"""
+        """10초마다 MSSQL Treating(치료실)을 SQLite waiting_queue에 동기화
+
+        - MSSQL Treating → SQLite waiting_queue (queue_type='treatment')
+        - MSSQL Waiting(대기실)은 동기화하지 않음 (CS관리에서 수동 처리)
+        """
         import time
         import requests
 
@@ -1130,24 +1134,25 @@ class UnifiedServerGUI:
             try:
                 # 두 서버가 모두 실행 중인지 확인
                 if not self.mssql_running or not self.sqlite_running:
-                    time.sleep(10)
+                    time.sleep(5)
                     continue
 
                 mssql_port = self.mssql_port_var.get()
                 sqlite_port = self.sqlite_port_var.get()
 
-                # 1. MSSQL에서 대기 + 치료실 목록 가져오기
+                # 1. MSSQL에서 치료실(Treating) 목록만 가져오기
                 try:
                     mssql_res = requests.get(
                         f"http://localhost:{mssql_port}/api/queue/status",
                         timeout=5
                     )
                     if mssql_res.status_code != 200:
-                        time.sleep(10)
+                        time.sleep(5)
                         continue
 
                     queue_data = mssql_res.json()
-                    waiting_list = queue_data.get('waiting', [])
+                    # Waiting(대기실)은 동기화하지 않음 - CS관리에서 수동 처리
+                    # waiting_list = queue_data.get('waiting', [])
                     treating_list = queue_data.get('treating', [])
 
                     # treating 데이터를 waiting 형식에 맞게 변환
@@ -1156,24 +1161,24 @@ class UnifiedServerGUI:
                         if 'treating_since' in t and 'waiting_since' not in t:
                             t['waiting_since'] = t['treating_since']
 
-                    # 두 목록 합치기
-                    combined_list = waiting_list + treating_list
+                    # Treating만 동기화
+                    sync_list = treating_list
 
                 except requests.exceptions.RequestException:
                     # MSSQL 연결 실패 - 조용히 다음 시도
-                    time.sleep(10)
+                    time.sleep(5)
                     continue
 
                 # 목록이 비어있으면 동기화 스킵 (SQLite 유지)
-                if not combined_list:
-                    time.sleep(10)
+                if not sync_list:
+                    time.sleep(5)
                     continue
 
                 # 2. SQLite에 동기화
                 try:
                     sync_res = requests.post(
                         f"http://localhost:{sqlite_port}/api/waiting-queue/sync",
-                        json={"waiting": combined_list},
+                        json={"waiting": sync_list},
                         timeout=5
                     )
 
@@ -1191,7 +1196,7 @@ class UnifiedServerGUI:
                 # 예상치 못한 오류 - 로그만 남기고 계속
                 sqlite_db.log(f"대기열 동기화 오류: {e}")
 
-            time.sleep(10)
+            time.sleep(5)
 
     def _check_and_start_waiting_sync(self):
         """두 서버가 모두 실행 중이면 동기화 시작"""

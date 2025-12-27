@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "3.0.6"  # 중복 방지: patient_id로만 체크
+APP_VERSION = "3.1.0"  # Treating만 동기화 (Waiting은 CS관리에서 수동 처리)
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
