@@ -699,6 +699,7 @@ def gpt_soap():
 
 def _ensure_waiting_queue_columns():
     """waiting_queue 테이블에 MSSQL 동기화용 컬럼 추가"""
+    conn = None
     try:
         conn = sqlite_db.get_connection()
         cursor = conn.cursor()
@@ -724,29 +725,31 @@ def _ensure_waiting_queue_columns():
             cursor.execute("ALTER TABLE waiting_queue ADD COLUMN sex TEXT")
 
         conn.commit()
-        conn.close()
         return True
     except Exception as e:
         sqlite_db.log(f"waiting_queue 컬럼 추가 오류: {e}")
         return False
+    finally:
+        if conn:
+            conn.close()
 
 
 @sqlite_bp.route('/api/waiting-queue/sync', methods=['POST', 'OPTIONS'])
 def sync_waiting_queue():
-    """MSSQL Waiting 데이터를 SQLite waiting_queue에 동기화
+    """MSSQL Waiting+Treating 데이터를 SQLite waiting_queue에 동기화
 
     Request Body:
-        - waiting: MSSQL Waiting 테이블 데이터 배열
+        - waiting: MSSQL Waiting+Treating 테이블 데이터 배열
           [{id, patient_id, chart_no, patient_name, age, sex, waiting_since, doctor, ...}, ...]
 
     Response:
         - added: 추가된 환자 수
-        - skipped_treating: 치료실에 있어서 스킵된 수
-        - skipped_duplicate: 이미 있어서 스킵된 수
+        - skipped_duplicate: 이미 있어서 스킵된 수 (같은 patient_id + intotime)
     """
     if request.method == 'OPTIONS':
         return cors_preflight_response()
 
+    conn = None
     try:
         # 컬럼 확인/추가
         _ensure_waiting_queue_columns()
@@ -757,7 +760,6 @@ def sync_waiting_queue():
         if not mssql_waiting:
             return json_response({
                 "added": 0,
-                "skipped_treating": 0,
                 "skipped_duplicate": 0,
                 "message": "No waiting data provided"
             })
@@ -765,24 +767,19 @@ def sync_waiting_queue():
         conn = sqlite_db.get_connection()
         cursor = conn.cursor()
 
-        # 1. 현재 치료실에 있는 patient_id 목록 조회
-        cursor.execute("SELECT patient_id FROM treatment_rooms WHERE patient_id IS NOT NULL")
-        treating_patient_ids = {row[0] for row in cursor.fetchall()}
-
-        # 2. 현재 waiting_queue에 있는 (patient_id, mssql_intotime) 조회
+        # 현재 waiting_queue에 있는 patient_id 조회 (중복 방지)
         cursor.execute("""
-            SELECT patient_id, mssql_intotime FROM waiting_queue
-            WHERE queue_type = 'treatment' AND mssql_intotime IS NOT NULL
+            SELECT patient_id FROM waiting_queue
+            WHERE queue_type = 'treatment'
         """)
-        existing_entries = {(row[0], row[1]) for row in cursor.fetchall()}
+        existing_patient_ids = {row[0] for row in cursor.fetchall()}
 
-        # 3. 현재 최대 position 조회
+        # 현재 최대 position 조회
         cursor.execute("SELECT MAX(position) FROM waiting_queue WHERE queue_type = 'treatment'")
         max_pos_row = cursor.fetchone()
         next_position = (max_pos_row[0] or -1) + 1
 
         added = 0
-        skipped_treating = 0
         skipped_duplicate = 0
 
         from datetime import datetime
@@ -795,19 +792,14 @@ def sync_waiting_queue():
             if not patient_id:
                 continue
 
-            # 치료실에 있으면 스킵
-            if patient_id in treating_patient_ids:
-                skipped_treating += 1
-                continue
-
-            # 이미 있으면 스킵 (같은 patient_id + intotime)
-            if (patient_id, intotime) in existing_entries:
+            # 이미 있으면 스킵 (같은 patient_id)
+            if patient_id in existing_patient_ids:
                 skipped_duplicate += 1
                 continue
 
-            # INSERT
+            # INSERT OR IGNORE: UNIQUE 제약 있어도 에러 없이 스킵
             cursor.execute("""
-                INSERT INTO waiting_queue
+                INSERT OR IGNORE INTO waiting_queue
                 (patient_id, queue_type, details, position, doctor,
                  mssql_waiting_pk, mssql_intotime, synced_at,
                  chart_number, patient_name, age, sex)
@@ -826,17 +818,17 @@ def sync_waiting_queue():
                 patient.get('sex') or ''
             ))
 
-            next_position += 1
-            added += 1
-            existing_entries.add((patient_id, intotime))
+            # INSERT OR IGNORE는 rowcount로 실제 삽입 여부 확인
+            if cursor.rowcount > 0:
+                next_position += 1
+                added += 1
+                existing_patient_ids.add(patient_id)
 
         conn.commit()
-        conn.close()
 
         return json_response({
             "success": True,
             "added": added,
-            "skipped_treating": skipped_treating,
             "skipped_duplicate": skipped_duplicate,
             "message": f"동기화 완료: {added}명 추가"
         })
@@ -844,3 +836,6 @@ def sync_waiting_queue():
     except Exception as e:
         sqlite_db.log(f"waiting_queue 동기화 오류: {e}")
         return json_response({"error": str(e)}, 500)
+    finally:
+        if conn:
+            conn.close()
