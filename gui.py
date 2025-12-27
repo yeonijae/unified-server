@@ -43,6 +43,10 @@ class UnifiedServerGUI:
         self.mssql_log = None
         self.sqlite_log = None
 
+        # MSSQL → SQLite 대기열 동기화 스레드
+        self.waiting_sync_running = False
+        self.waiting_sync_thread = None
+
         self._setup_styles()
         self._create_widgets()
         self._setup_tray()
@@ -887,6 +891,9 @@ class UnifiedServerGUI:
         self.mssql_start_btn.configure(state=tk.DISABLED)
         self.mssql_stop_btn.configure(state=tk.NORMAL)
 
+        # 대기열 동기화 체크
+        self._check_and_start_waiting_sync()
+
     def _on_mssql_reload(self, new_version):
         """핫 리로드 후 GUI 업데이트"""
         self.mssql_api_version_var.set(f"v{new_version}")
@@ -908,6 +915,9 @@ class UnifiedServerGUI:
         self.mssql_status_label.configure(foreground="orange")
         self.mssql_start_btn.configure(state=tk.NORMAL)
         self.mssql_stop_btn.configure(state=tk.DISABLED)
+
+        # 대기열 동기화 체크
+        self._check_and_start_waiting_sync()
 
     def _test_mssql(self):
         self.mssql_test_var.set("Testing...")
@@ -1007,6 +1017,9 @@ class UnifiedServerGUI:
 
         sqlite_db.start_backup_scheduler()
 
+        # 대기열 동기화 체크
+        self._check_and_start_waiting_sync()
+
     def _stop_sqlite(self):
         self.sqlite_running = False
         sqlite_db.log("서버 중지됨", force=True)
@@ -1014,6 +1027,9 @@ class UnifiedServerGUI:
         self.sqlite_status_label.configure(foreground="orange")
         self.sqlite_start_btn.configure(state=tk.NORMAL)
         self.sqlite_stop_btn.configure(state=tk.DISABLED)
+
+        # 대기열 동기화 중지
+        self._check_and_start_waiting_sync()
 
     def _manual_backup(self):
         if not sqlite_db.get_db_path():
@@ -1087,6 +1103,92 @@ class UnifiedServerGUI:
         save_config(self.config)
         sqlite_db.start_backup_scheduler()
         messagebox.showinfo("Success", "SQLite settings saved")
+
+    # ============ MSSQL → SQLite 대기열 동기화 ============
+    def _start_waiting_sync(self):
+        """MSSQL Waiting → SQLite waiting_queue 백그라운드 동기화 시작"""
+        if self.waiting_sync_running:
+            return
+
+        self.waiting_sync_running = True
+        self.waiting_sync_thread = threading.Thread(target=self._waiting_sync_loop, daemon=True)
+        self.waiting_sync_thread.start()
+        sqlite_db.log("대기열 동기화 시작 (10초 간격)", force=True)
+
+    def _stop_waiting_sync(self):
+        """동기화 중지"""
+        self.waiting_sync_running = False
+        if self.waiting_sync_thread:
+            self.waiting_sync_thread = None
+
+    def _waiting_sync_loop(self):
+        """10초마다 MSSQL Waiting을 SQLite에 동기화"""
+        import time
+        import requests
+
+        while self.waiting_sync_running:
+            try:
+                # 두 서버가 모두 실행 중인지 확인
+                if not self.mssql_running or not self.sqlite_running:
+                    time.sleep(10)
+                    continue
+
+                mssql_port = self.mssql_port_var.get()
+                sqlite_port = self.sqlite_port_var.get()
+
+                # 1. MSSQL에서 대기 목록 가져오기
+                try:
+                    mssql_res = requests.get(
+                        f"http://localhost:{mssql_port}/api/queue/status",
+                        timeout=5
+                    )
+                    if mssql_res.status_code != 200:
+                        time.sleep(10)
+                        continue
+
+                    queue_data = mssql_res.json()
+                    waiting_list = queue_data.get('waiting', [])
+
+                except requests.exceptions.RequestException:
+                    # MSSQL 연결 실패 - 조용히 다음 시도
+                    time.sleep(10)
+                    continue
+
+                # 대기 목록이 비어있으면 동기화 스킵 (SQLite 유지)
+                if not waiting_list:
+                    time.sleep(10)
+                    continue
+
+                # 2. SQLite에 동기화
+                try:
+                    sync_res = requests.post(
+                        f"http://localhost:{sqlite_port}/api/waiting-queue/sync",
+                        json={"waiting": waiting_list},
+                        timeout=5
+                    )
+
+                    if sync_res.status_code == 200:
+                        result = sync_res.json()
+                        added = result.get('added', 0)
+                        if added > 0:
+                            sqlite_db.log(f"대기열 동기화: {added}명 추가", force=True)
+
+                except requests.exceptions.RequestException:
+                    # SQLite 연결 실패 - 조용히 다음 시도
+                    pass
+
+            except Exception as e:
+                # 예상치 못한 오류 - 로그만 남기고 계속
+                sqlite_db.log(f"대기열 동기화 오류: {e}")
+
+            time.sleep(10)
+
+    def _check_and_start_waiting_sync(self):
+        """두 서버가 모두 실행 중이면 동기화 시작"""
+        if self.mssql_running and self.sqlite_running:
+            self._start_waiting_sync()
+        else:
+            self._stop_waiting_sync()
 
     def _save_webhook_settings(self):
         self.config["webhook_secret"] = self.webhook_secret_var.get()

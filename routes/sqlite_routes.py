@@ -581,3 +581,266 @@ def whisper_transcribe():
     except Exception as e:
         sqlite_db.log(f"Whisper 오류: {str(e)}")
         return json_response({"error": str(e)}, 500)
+
+
+# ============ GPT SOAP 변환 ============
+
+@sqlite_bp.route('/api/gpt/soap', methods=['POST', 'OPTIONS'])
+def gpt_soap():
+    """GPT로 진료 녹취록을 SOAP 형식으로 변환
+
+    Request:
+        - transcript: 녹취록 텍스트
+        - acting_type: 진료 종류 (침치료, 추나, 약상담 등)
+        - patient_info: 환자 정보 (선택, 참고용)
+
+    Response:
+        - subjective: 주관적 증상 (환자 호소)
+        - objective: 객관적 소견 (검사/관찰)
+        - assessment: 평가/진단
+        - plan: 치료 계획
+    """
+    if request.method == 'OPTIONS':
+        return cors_preflight_response()
+
+    try:
+        config = load_config()
+        api_key = config.get('openai_api_key') or os.environ.get('OPENAI_API_KEY')
+
+        if not api_key:
+            return json_response({
+                "error": "OpenAI API key not configured."
+            }, 400)
+
+        data = request.get_json() or {}
+        transcript = data.get('transcript', '')
+        acting_type = data.get('acting_type', '진료')
+        patient_info = data.get('patient_info', '')
+
+        if not transcript or len(transcript.strip()) < 10:
+            return json_response({
+                "error": "Transcript too short for SOAP conversion"
+            }, 400)
+
+        # GPT 프롬프트
+        system_prompt = """당신은 한의원 진료 기록을 SOAP 형식으로 정리하는 전문가입니다.
+주어진 진료 녹취록을 분석하여 SOAP 형식으로 변환해주세요.
+
+출력 형식 (JSON):
+{
+  "subjective": "환자가 호소하는 증상, 불편함, 병력 등 (환자 말 인용)",
+  "objective": "의사의 관찰, 검사 소견, 촉진/시진 결과 등",
+  "assessment": "진단명, 상태 평가, 변증 등",
+  "plan": "치료 계획, 처방, 다음 예약, 생활 지도 등"
+}
+
+주의사항:
+- 녹취록에 없는 내용은 추측하지 말고 해당 항목을 비워두세요
+- 한의학 용어와 일반 용어를 적절히 혼용하세요
+- 간결하고 명확하게 작성하세요
+- 반드시 유효한 JSON 형식으로 응답하세요"""
+
+        user_prompt = f"""진료 종류: {acting_type}
+{f'환자 정보: {patient_info}' if patient_info else ''}
+
+녹취록:
+{transcript}"""
+
+        import requests as req
+
+        response = req.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_prompt}
+                ],
+                'temperature': 0.3,
+                'response_format': {'type': 'json_object'}
+            }
+        )
+
+        if response.status_code != 200:
+            error_msg = response.json().get('error', {}).get('message', 'Unknown error')
+            return json_response({
+                "error": f"GPT API error: {error_msg}"
+            }, response.status_code)
+
+        result = response.json()
+        content = result.get('choices', [{}])[0].get('message', {}).get('content', '{}')
+
+        import json
+        soap_data = json.loads(content)
+
+        return json_response({
+            "success": True,
+            "subjective": soap_data.get('subjective', ''),
+            "objective": soap_data.get('objective', ''),
+            "assessment": soap_data.get('assessment', ''),
+            "plan": soap_data.get('plan', ''),
+            "usage": result.get('usage', {})
+        })
+
+    except json.JSONDecodeError as e:
+        return json_response({
+            "error": f"Failed to parse GPT response as JSON: {str(e)}"
+        }, 500)
+    except Exception as e:
+        sqlite_db.log(f"GPT SOAP 오류: {str(e)}")
+        return json_response({"error": str(e)}, 500)
+
+
+# ============ MSSQL Waiting → SQLite 동기화 ============
+
+def _ensure_waiting_queue_columns():
+    """waiting_queue 테이블에 MSSQL 동기화용 컬럼 추가"""
+    try:
+        conn = sqlite_db.get_connection()
+        cursor = conn.cursor()
+
+        # 기존 컬럼 확인
+        cursor.execute("PRAGMA table_info(waiting_queue)")
+        columns = {row[1] for row in cursor.fetchall()}
+
+        # 필요한 컬럼 추가
+        if 'mssql_waiting_pk' not in columns:
+            cursor.execute("ALTER TABLE waiting_queue ADD COLUMN mssql_waiting_pk INTEGER")
+        if 'mssql_intotime' not in columns:
+            cursor.execute("ALTER TABLE waiting_queue ADD COLUMN mssql_intotime TEXT")
+        if 'synced_at' not in columns:
+            cursor.execute("ALTER TABLE waiting_queue ADD COLUMN synced_at TEXT")
+        if 'chart_number' not in columns:
+            cursor.execute("ALTER TABLE waiting_queue ADD COLUMN chart_number TEXT")
+        if 'patient_name' not in columns:
+            cursor.execute("ALTER TABLE waiting_queue ADD COLUMN patient_name TEXT")
+        if 'age' not in columns:
+            cursor.execute("ALTER TABLE waiting_queue ADD COLUMN age INTEGER")
+        if 'sex' not in columns:
+            cursor.execute("ALTER TABLE waiting_queue ADD COLUMN sex TEXT")
+
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        sqlite_db.log(f"waiting_queue 컬럼 추가 오류: {e}")
+        return False
+
+
+@sqlite_bp.route('/api/waiting-queue/sync', methods=['POST', 'OPTIONS'])
+def sync_waiting_queue():
+    """MSSQL Waiting 데이터를 SQLite waiting_queue에 동기화
+
+    Request Body:
+        - waiting: MSSQL Waiting 테이블 데이터 배열
+          [{id, patient_id, chart_no, patient_name, age, sex, waiting_since, doctor, ...}, ...]
+
+    Response:
+        - added: 추가된 환자 수
+        - skipped_treating: 치료실에 있어서 스킵된 수
+        - skipped_duplicate: 이미 있어서 스킵된 수
+    """
+    if request.method == 'OPTIONS':
+        return cors_preflight_response()
+
+    try:
+        # 컬럼 확인/추가
+        _ensure_waiting_queue_columns()
+
+        data = request.get_json() or {}
+        mssql_waiting = data.get('waiting', [])
+
+        if not mssql_waiting:
+            return json_response({
+                "added": 0,
+                "skipped_treating": 0,
+                "skipped_duplicate": 0,
+                "message": "No waiting data provided"
+            })
+
+        conn = sqlite_db.get_connection()
+        cursor = conn.cursor()
+
+        # 1. 현재 치료실에 있는 patient_id 목록 조회
+        cursor.execute("SELECT patient_id FROM treatment_rooms WHERE patient_id IS NOT NULL")
+        treating_patient_ids = {row[0] for row in cursor.fetchall()}
+
+        # 2. 현재 waiting_queue에 있는 (patient_id, mssql_intotime) 조회
+        cursor.execute("""
+            SELECT patient_id, mssql_intotime FROM waiting_queue
+            WHERE queue_type = 'treatment' AND mssql_intotime IS NOT NULL
+        """)
+        existing_entries = {(row[0], row[1]) for row in cursor.fetchall()}
+
+        # 3. 현재 최대 position 조회
+        cursor.execute("SELECT MAX(position) FROM waiting_queue WHERE queue_type = 'treatment'")
+        max_pos_row = cursor.fetchone()
+        next_position = (max_pos_row[0] or -1) + 1
+
+        added = 0
+        skipped_treating = 0
+        skipped_duplicate = 0
+
+        from datetime import datetime
+        now = datetime.now().isoformat()
+
+        for patient in mssql_waiting:
+            patient_id = patient.get('patient_id')
+            intotime = patient.get('waiting_since') or patient.get('intotime')
+
+            if not patient_id:
+                continue
+
+            # 치료실에 있으면 스킵
+            if patient_id in treating_patient_ids:
+                skipped_treating += 1
+                continue
+
+            # 이미 있으면 스킵 (같은 patient_id + intotime)
+            if (patient_id, intotime) in existing_entries:
+                skipped_duplicate += 1
+                continue
+
+            # INSERT
+            cursor.execute("""
+                INSERT INTO waiting_queue
+                (patient_id, queue_type, details, position, doctor,
+                 mssql_waiting_pk, mssql_intotime, synced_at,
+                 chart_number, patient_name, age, sex)
+                VALUES (?, 'treatment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                patient_id,
+                patient.get('status') or '',
+                next_position,
+                patient.get('doctor') or '',
+                patient.get('id'),  # mssql_waiting_pk
+                intotime,
+                now,
+                patient.get('chart_no') or '',
+                patient.get('patient_name') or '',
+                patient.get('age'),
+                patient.get('sex') or ''
+            ))
+
+            next_position += 1
+            added += 1
+            existing_entries.add((patient_id, intotime))
+
+        conn.commit()
+        conn.close()
+
+        return json_response({
+            "success": True,
+            "added": added,
+            "skipped_treating": skipped_treating,
+            "skipped_duplicate": skipped_duplicate,
+            "message": f"동기화 완료: {added}명 추가"
+        })
+
+    except Exception as e:
+        sqlite_db.log(f"waiting_queue 동기화 오류: {e}")
+        return json_response({"error": str(e)}, 500)
