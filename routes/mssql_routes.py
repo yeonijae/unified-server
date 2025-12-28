@@ -666,63 +666,245 @@ def receipts_by_date():
 
 @mssql_bp.route('/api/receipts/by-patient')
 def receipts_by_patient():
-    """환자별 수납내역 조회 (차트번호 기준, 최근 N건)"""
+    """환자별 수납내역 조회 (patientId 또는 chartNo 기준, 페이지네이션 지원)"""
     try:
+        # 파라미터 파싱
+        patient_id = request.args.get('patientId', type=int)
         chart_no = request.args.get('chartNo', '')
-        limit = int(request.args.get('limit', 3))
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 30, type=int)
+        start_date = request.args.get('startDate', '')
+        end_date = request.args.get('endDate', '')
 
-        if not chart_no:
-            return jsonify({"error": "차트번호가 필요합니다."}), 400
+        if not patient_id and not chart_no:
+            return jsonify({"error": "patientId 또는 chartNo가 필요합니다."}), 400
 
         conn = mssql_db.get_connection()
         if not conn:
             return jsonify({"error": "MSSQL 연결 실패"}), 500
 
-        # 차트번호 6자리 패딩 (sn 컬럼은 6자리)
-        padded_chart_no = chart_no.zfill(6)
-
         cursor = conn.cursor(as_dict=True)
 
-        # MasterDB.Receipt 테이블에서 최근 수납내역 조회
-        cursor.execute("""
-            SELECT TOP %s
+        # WHERE 조건 구성
+        where_conditions = []
+        params = []
+
+        if patient_id:
+            where_conditions.append("r.Customer_PK = %s")
+            params.append(patient_id)
+        elif chart_no:
+            padded_chart_no = chart_no.zfill(6)
+            where_conditions.append("r.sn = %s")
+            params.append(padded_chart_no)
+
+        if start_date:
+            where_conditions.append("CAST(r.TxDate AS DATE) >= %s")
+            params.append(start_date)
+        if end_date:
+            where_conditions.append("CAST(r.TxDate AS DATE) <= %s")
+            params.append(end_date)
+
+        where_clause = " AND ".join(where_conditions)
+
+        # 1. 총 건수 조회
+        cursor.execute(f"""
+            SELECT COUNT(*) as total_count,
+                   ISNULL(SUM(r.Bonin_Money), 0) as total_insurance_self,
+                   ISNULL(SUM(r.General_Money), 0) as total_general
+            FROM Receipt r
+            WHERE {where_clause}
+        """, tuple(params))
+        count_row = cursor.fetchone()
+        total_count = count_row['total_count'] or 0
+        total_insurance_self = int(count_row['total_insurance_self'] or 0)
+        total_general = int(count_row['total_general'] or 0)
+        total_pages = (total_count + limit - 1) // limit if limit > 0 else 1
+
+        # 2. 수납 내역 조회 (페이지네이션)
+        offset = (page - 1) * limit
+        cursor.execute(f"""
+            SELECT
               r.Receipt_PK as id,
               r.Customer_PK as patient_id,
               r.Customer_name as patient_name,
               r.sn as chart_no,
               r.TxDate as receipt_date,
-              r.Bonin_Money as bonin_money,
-              r.CheongGu_Money as cheonggu_money,
-              r.General_Money as general_money,
-              r.SUMMARYTREAT as summary
-            FROM MasterDB.dbo.Receipt r
-            WHERE r.sn = %s
-            ORDER BY r.TxDate DESC, r.Receipt_PK DESC
-        """, (limit, padded_chart_no))
+              r.Bonin_Money as insurance_self,
+              r.CheongGu_Money as insurance_claim,
+              r.General_Money as general_amount,
+              r.MisuMoney as unpaid,
+              r.WriteTime as receipt_time,
+              c.insu_type,
+              c.insu_bohum_type,
+              c.insu_boho_type,
+              c.pregmark,
+              c.SeriousTag,
+              c.birth,
+              ISNULL(SUM(CASE WHEN t.trans_method = '01' THEN t.trans_Money ELSE 0 END), 0) as card_amount,
+              ISNULL(SUM(CASE WHEN t.trans_method = '00' THEN t.trans_Money ELSE 0 END), 0) as cash_amount,
+              ISNULL(SUM(CASE WHEN t.trans_method IN ('10', '11', '12', '02') THEN t.trans_Money ELSE 0 END), 0) as transfer_amount
+            FROM Receipt r
+            LEFT JOIN Customer c ON r.Customer_PK = c.Customer_PK
+            LEFT JOIN Transaction_TB t ON r.Receipt_PK = t.trans_Receipt_PK
+            WHERE {where_clause}
+            GROUP BY r.Receipt_PK, r.Customer_PK, r.Customer_name, r.sn,
+                     r.TxDate, r.Bonin_Money, r.CheongGu_Money, r.General_Money, r.MisuMoney,
+                     r.WriteTime, c.insu_type, c.insu_bohum_type, c.insu_boho_type,
+                     c.pregmark, c.SeriousTag, c.birth
+            ORDER BY r.TxDate DESC, r.WriteTime DESC
+            OFFSET %s ROWS FETCH NEXT %s ROWS ONLY
+        """, tuple(params) + (offset, limit))
+        receipts_raw = cursor.fetchall()
 
-        rows = cursor.fetchall()
-        conn.close()
+        # 3. 각 수납별 진료 내역 조회
+        result = []
+        for r in receipts_raw:
+            receipt_id = r['id']
+            receipt_date = r['receipt_date']
+            receipt_date_str = receipt_date.strftime('%Y-%m-%d') if receipt_date else None
 
-        receipts = []
-        for r in rows:
-            # 총 수납액 계산 (본인부담 + 청구 + 일반)
-            total_amount = (int(r['bonin_money'] or 0) +
-                          int(r['cheonggu_money'] or 0) +
-                          int(r['general_money'] or 0))
-            receipts.append({
-                'id': r['id'],
+            # 해당 환자의 해당 날짜 진료 내역
+            if receipt_date_str:
+                cursor.execute("""
+                    SELECT
+                      Detail_PK as id,
+                      TxItem as tx_item,
+                      PxName as px_name,
+                      DxName as dx_name,
+                      TxDoctor as doctor,
+                      TxMoney as amount,
+                      InsuYes as is_covered,
+                      추나여부상태 as choona_status,
+                      IsYakChim as is_yakchim,
+                      WriteTime as detail_time
+                    FROM Detail
+                    WHERE Customer_PK = %s AND CAST(TxDate AS DATE) = %s
+                    ORDER BY WriteTime ASC
+                """, (r['patient_id'], receipt_date_str))
+                details = cursor.fetchall()
+            else:
+                details = []
+
+            # 치료 항목 분류
+            treatments = []
+            has_acupuncture = False
+            has_choona = False
+            has_yakchim = False
+            uncovered_items = []
+            is_jabo = False
+
+            for d in details:
+                tx_item = (d['tx_item'] or '').strip()
+                px_name = (d['px_name'] or '').strip()
+                is_covered = d['is_covered']
+
+                if '자동차보험' in tx_item:
+                    is_jabo = True
+
+                if d['choona_status'] == '1':
+                    has_choona = True
+
+                if d['is_yakchim']:
+                    has_yakchim = True
+
+                if is_covered and d['choona_status'] != '1' and not d['is_yakchim']:
+                    if '침' in px_name or '자락' in px_name or '부항' in px_name or '뜸' in px_name:
+                        has_acupuncture = True
+
+                if not is_covered and d['amount'] and d['amount'] > 0:
+                    uncovered_items.append({
+                        'name': px_name or tx_item,
+                        'amount': int(d['amount'])
+                    })
+
+                treatments.append({
+                    'id': d['id'],
+                    'item': tx_item,
+                    'name': px_name,
+                    'diagnosis': d['dx_name'],
+                    'doctor': d['doctor'],
+                    'amount': int(d['amount'] or 0),
+                    'is_covered': is_covered,
+                    'time': d['detail_time'].strftime('%H:%M') if d['detail_time'] else None
+                })
+
+            # 종별 분류
+            insurance_type = _classify_insurance_type(
+                insu_type=r['insu_type'],
+                insu_bohum_type=r['insu_bohum_type'],
+                insu_boho_type=r['insu_boho_type'],
+                pregmark=r['pregmark'],
+                serious_tag=r['SeriousTag'],
+                is_jabo=is_jabo
+            )
+
+            # receipt_time 포맷
+            receipt_time_str = None
+            if r['receipt_time']:
+                try:
+                    if hasattr(r['receipt_time'], 'strftime'):
+                        receipt_time_str = r['receipt_time'].strftime('%Y-%m-%d %H:%M')
+                    else:
+                        receipt_time_str = str(r['receipt_time'])
+                except:
+                    receipt_time_str = str(r['receipt_time'])
+
+            # 나이 계산
+            age = None
+            if r['birth']:
+                try:
+                    birth_date = r['birth']
+                    today = datetime.now()
+                    age = today.year - birth_date.year
+                    if (today.month, today.day) < (birth_date.month, birth_date.day):
+                        age -= 1
+                except:
+                    pass
+
+            result.append({
+                'id': receipt_id,
                 'patient_id': r['patient_id'],
                 'patient_name': r['patient_name'],
                 'chart_no': r['chart_no'],
-                'receipt_date': r['receipt_date'].strftime('%Y-%m-%d') if r['receipt_date'] else None,
-                'amount': total_amount,
-                'bonin_money': int(r['bonin_money'] or 0),
-                'cheonggu_money': int(r['cheonggu_money'] or 0),
-                'general_money': int(r['general_money'] or 0),
-                'summary': r['summary']
+                'age': age,
+                'receipt_date': receipt_date_str,
+                'receipt_time': receipt_time_str,
+                'insurance_self': int(r['insurance_self'] or 0),
+                'insurance_claim': int(r['insurance_claim'] or 0),
+                'general_amount': int(r['general_amount'] or 0),
+                'total_amount': int((r['insurance_self'] or 0) + (r['general_amount'] or 0)),
+                'unpaid': int(r['unpaid'] or 0),
+                'cash': int(r['cash_amount'] or 0),
+                'card': int(r['card_amount'] or 0),
+                'transfer': int(r['transfer_amount'] or 0),
+                'insurance_type': insurance_type,
+                'treatment_summary': {
+                    'acupuncture': has_acupuncture,
+                    'choona': has_choona,
+                    'yakchim': has_yakchim,
+                    'uncovered': uncovered_items
+                },
+                'treatments': treatments
             })
 
-        return jsonify(receipts)
+        conn.close()
+
+        return jsonify({
+            'receipts': result,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total_count,
+                'total_pages': total_pages,
+                'has_more': page < total_pages
+            },
+            'summary': {
+                'total_count': total_count,
+                'total_amount': total_insurance_self + total_general,
+                'insurance_self': total_insurance_self,
+                'general_amount': total_general
+            }
+        })
 
     except Exception as e:
         mssql_db.log(f"환자별 수납내역 조회 오류: {str(e)}")
