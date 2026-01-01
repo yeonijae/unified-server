@@ -555,10 +555,10 @@ def receipts_by_date():
                     if '침' in px_name or '자락' in px_name or '부항' in px_name or '뜸' in px_name:
                         has_acupuncture = True
 
-                if not is_covered and d['amount'] and d['amount'] > 0:
+                if not is_covered:
                     uncovered_items.append({
                         'name': px_name or tx_item,
-                        'amount': int(d['amount'])
+                        'amount': int(d['amount'] or 0)
                     })
 
                 treatments.append({
@@ -811,10 +811,10 @@ def receipts_by_patient():
                     if '침' in px_name or '자락' in px_name or '부항' in px_name or '뜸' in px_name:
                         has_acupuncture = True
 
-                if not is_covered and d['amount'] and d['amount'] > 0:
+                if not is_covered:
                     uncovered_items.append({
                         'name': px_name or tx_item,
-                        'amount': int(d['amount'])
+                        'amount': int(d['amount'] or 0)
                     })
 
                 treatments.append({
@@ -1705,10 +1705,10 @@ def today_pending_payments():
                         has_acupuncture = True
 
                 # 비급여 항목
-                if not is_covered and d['TxMoney'] and d['TxMoney'] > 0:
+                if not is_covered:
                     uncovered_items.append({
                         'name': px_name or tx_item,
-                        'amount': d['TxMoney']
+                        'amount': d['TxMoney'] or 0
                     })
 
             # 3. 종별 분류
