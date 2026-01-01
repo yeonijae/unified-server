@@ -7,7 +7,7 @@ MSSQL API 라우트
 """
 
 # 모듈 버전 (외부 파일로 배포 시 사용)
-MODULE_VERSION = "2.6.6"
+MODULE_VERSION = "2.6.7"
 
 from datetime import datetime
 import threading
@@ -555,7 +555,7 @@ def receipts_by_date():
                     if '침' in px_name or '자락' in px_name or '부항' in px_name or '뜸' in px_name:
                         has_acupuncture = True
 
-                if not is_covered:
+                if not is_covered and '술혈명' not in px_name:
                     uncovered_items.append({
                         'name': px_name or tx_item,
                         'amount': int(d['amount'] or 0)
@@ -811,7 +811,7 @@ def receipts_by_patient():
                     if '침' in px_name or '자락' in px_name or '부항' in px_name or '뜸' in px_name:
                         has_acupuncture = True
 
-                if not is_covered:
+                if not is_covered and '술혈명' not in px_name:
                     uncovered_items.append({
                         'name': px_name or tx_item,
                         'amount': int(d['amount'] or 0)
@@ -1704,8 +1704,8 @@ def today_pending_payments():
                     if '침' in px_name or '자락' in px_name or '부항' in px_name or '뜸' in px_name:
                         has_acupuncture = True
 
-                # 비급여 항목
-                if not is_covered:
+                # 비급여 항목 (술혈명 제외)
+                if not is_covered and '술혈명' not in px_name:
                     uncovered_items.append({
                         'name': px_name or tx_item,
                         'amount': d['TxMoney'] or 0
