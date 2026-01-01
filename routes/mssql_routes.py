@@ -7,7 +7,7 @@ MSSQL API 라우트
 """
 
 # 모듈 버전 (외부 파일로 배포 시 사용)
-MODULE_VERSION = "2.6.5"
+MODULE_VERSION = "2.6.6"
 
 from datetime import datetime
 import threading
