@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "3.1.2"  # 0원 비급여 항목 표시
+APP_VERSION = "3.1.3"  # GPT chat/diarize 엔드포인트 추가
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)

@@ -695,6 +695,187 @@ def gpt_soap():
         return json_response({"error": str(e)}, 500)
 
 
+# ============ GPT Chat (범용) ============
+
+@sqlite_bp.route('/api/gpt/chat', methods=['POST', 'OPTIONS'])
+def gpt_chat():
+    """GPT Chat API (범용 채팅/분석용)
+
+    Request:
+        - messages: 메시지 배열 [{"role": "system/user/assistant", "content": "..."}]
+        - temperature: 온도 (기본: 0.7)
+        - model: 모델명 (기본: gpt-4o-mini)
+
+    Response:
+        - content: GPT 응답 텍스트
+        - usage: 토큰 사용량
+    """
+    if request.method == 'OPTIONS':
+        return cors_preflight_response()
+
+    try:
+        config = load_config()
+        api_key = config.get('openai_api_key') or os.environ.get('OPENAI_API_KEY')
+
+        if not api_key:
+            return json_response({
+                "error": "OpenAI API key not configured."
+            }, 400)
+
+        data = request.get_json() or {}
+        messages = data.get('messages', [])
+        temperature = data.get('temperature', 0.7)
+        model = data.get('model', 'gpt-4o-mini')
+
+        if not messages:
+            return json_response({
+                "error": "messages array is required"
+            }, 400)
+
+        import requests as req
+
+        response = req.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': model,
+                'messages': messages,
+                'temperature': temperature
+            }
+        )
+
+        if response.status_code != 200:
+            error_msg = response.json().get('error', {}).get('message', 'Unknown error')
+            return json_response({
+                "error": f"GPT API error: {error_msg}"
+            }, response.status_code)
+
+        result = response.json()
+        content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+
+        return json_response({
+            "success": True,
+            "content": content,
+            "message": content,  # 호환성
+            "usage": result.get('usage', {})
+        })
+
+    except Exception as e:
+        sqlite_db.log(f"GPT Chat 오류: {str(e)}")
+        return json_response({"error": str(e)}, 500)
+
+
+# ============ GPT 화자 분리 (Diarization) ============
+
+@sqlite_bp.route('/api/gpt/diarize', methods=['POST', 'OPTIONS'])
+def gpt_diarize():
+    """GPT로 녹취록 화자 분리
+
+    Request:
+        - transcript: 녹취록 텍스트
+        - acting_type: 진료 종류 (선택)
+
+    Response:
+        - formatted: 화자 분리된 텍스트 ([의사] ... [환자] ...)
+        - utterances: [{speaker: 'doctor'|'patient', text: '...'}]
+    """
+    if request.method == 'OPTIONS':
+        return cors_preflight_response()
+
+    try:
+        config = load_config()
+        api_key = config.get('openai_api_key') or os.environ.get('OPENAI_API_KEY')
+
+        if not api_key:
+            return json_response({
+                "error": "OpenAI API key not configured."
+            }, 400)
+
+        data = request.get_json() or {}
+        transcript = data.get('transcript', '')
+        acting_type = data.get('acting_type', '진료')
+
+        if not transcript or len(transcript.strip()) < 10:
+            return json_response({
+                "error": "Transcript too short for diarization"
+            }, 400)
+
+        system_prompt = """당신은 한의원 진료 녹취록을 분석하는 전문가입니다.
+주어진 녹취록을 의사와 환자의 대화로 분리해주세요.
+
+규칙:
+1. 질문하거나 설명하는 쪽이 의사입니다
+2. 증상을 호소하거나 답변하는 쪽이 환자입니다
+3. 각 발화를 [의사] 또는 [환자] 태그로 시작해주세요
+4. 원문을 최대한 유지하되, 자연스럽게 대화 단위로 나눠주세요
+
+출력 형식:
+[의사] 어디가 불편하세요?
+[환자] 허리가 아파요.
+[의사] 언제부터 아프셨어요?
+..."""
+
+        user_prompt = f"진료 유형: {acting_type}\n\n녹취록:\n{transcript}"
+
+        import requests as req
+
+        response = req.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_prompt}
+                ],
+                'temperature': 0.3
+            }
+        )
+
+        if response.status_code != 200:
+            error_msg = response.json().get('error', {}).get('message', 'Unknown error')
+            return json_response({
+                "error": f"GPT API error: {error_msg}"
+            }, response.status_code)
+
+        result = response.json()
+        content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+
+        # 파싱: [의사], [환자] 태그 추출
+        utterances = []
+        for line in content.split('\n'):
+            trimmed = line.strip()
+            if not trimmed:
+                continue
+            if trimmed.startswith('[의사]'):
+                utterances.append({
+                    'speaker': 'doctor',
+                    'text': trimmed.replace('[의사]', '').strip()
+                })
+            elif trimmed.startswith('[환자]'):
+                utterances.append({
+                    'speaker': 'patient',
+                    'text': trimmed.replace('[환자]', '').strip()
+                })
+
+        return json_response({
+            "success": True,
+            "formatted": content,
+            "utterances": utterances,
+            "usage": result.get('usage', {})
+        })
+
+    except Exception as e:
+        sqlite_db.log(f"GPT Diarize 오류: {str(e)}")
+        return json_response({"error": str(e)}, 500)
+
+
 # ============ MSSQL Waiting → SQLite 동기화 ============
 
 def _ensure_waiting_queue_columns():
