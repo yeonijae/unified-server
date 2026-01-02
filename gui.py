@@ -710,17 +710,19 @@ class UnifiedServerGUI:
             return
 
         port = self.static_port_var.get()
+        https_port = port + 332  # 11111 -> 11443
         set_www_folder(www_folder)
 
         self.static_app = Flask(__name__)
         CORS(self.static_app)
         self.static_app.register_blueprint(static_bp)
 
-        def run():
+        # HTTP 서버
+        def run_http():
             self.static_running = True
             try:
                 from waitress import serve
-                git_build.log(f"Waitress 서버 시작 (포트: {port})")
+                git_build.log(f"HTTP 서버 시작 (포트: {port})")
                 serve(
                     self.static_app,
                     host='0.0.0.0',
@@ -735,7 +737,29 @@ class UnifiedServerGUI:
                 git_build.log(f"Flask 서버 시작 (포트: {port}) - Waitress 미설치")
                 self.static_app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
 
-        threading.Thread(target=run, daemon=True).start()
+        # HTTPS 서버 (iOS 녹음 지원용)
+        def run_https():
+            try:
+                from services.ssl_utils import get_ssl_context
+                ssl_context = get_ssl_context()
+
+                if ssl_context:
+                    git_build.log(f"HTTPS 서버 시작 (포트: {https_port}) - iOS 녹음 지원")
+                    # Flask 개발 서버로 HTTPS 실행 (Waitress는 SSL 미지원)
+                    self.static_app.run(
+                        host='0.0.0.0',
+                        port=https_port,
+                        ssl_context=ssl_context,
+                        threaded=True,
+                        use_reloader=False
+                    )
+                else:
+                    git_build.log("HTTPS 인증서 생성 실패 - HTTPS 서버 미시작")
+            except Exception as e:
+                git_build.log(f"HTTPS 서버 오류: {e}")
+
+        threading.Thread(target=run_http, daemon=True).start()
+        threading.Thread(target=run_https, daemon=True).start()
 
         self.static_status_var.set("Running")
         self.static_status_label.configure(foreground="green")
