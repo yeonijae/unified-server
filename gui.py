@@ -737,15 +737,20 @@ class UnifiedServerGUI:
                 git_build.log(f"Flask HTTP 서버 시작 (포트: {port})")
                 self.static_app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
 
-        # HTTPS 서버 (iOS용)
+        # HTTPS 서버 (iOS용) - 별도 Flask 앱 사용
         def run_https():
             try:
                 from services.ssl_utils import get_ssl_context
                 ssl_context = get_ssl_context()
 
                 if ssl_context:
+                    # HTTPS용 별도 Flask 앱 생성
+                    https_app = Flask(__name__)
+                    CORS(https_app)
+                    https_app.register_blueprint(static_bp)
+
                     git_build.log(f"HTTPS 서버 시작 (포트: {https_port}) - iOS용")
-                    self.static_app.run(
+                    https_app.run(
                         host='0.0.0.0',
                         port=https_port,
                         ssl_context=ssl_context,
