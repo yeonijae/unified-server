@@ -290,6 +290,33 @@ def webhook():
     return jsonify({"message": f"Event '{event_type}' ignored"})
 
 
+# ============ SSL 인증서 다운로드 ============
+
+@static_bp.route('/cert')
+def download_cert():
+    """SSL 인증서 다운로드 (iPad 설치용)"""
+    import sys
+    from pathlib import Path
+
+    # exe 실행 시 exe 위치 기준
+    if getattr(sys, 'frozen', False):
+        app_dir = Path(sys.executable).parent
+    else:
+        app_dir = Path(__file__).parent.parent
+
+    cert_file = app_dir / "certs" / "server.crt"
+
+    if not cert_file.exists():
+        return "인증서 파일이 없습니다. HTTPS 서버를 먼저 시작하세요.", 404
+
+    return send_file(
+        cert_file,
+        mimetype='application/x-x509-ca-cert',
+        as_attachment=True,
+        download_name='haniwon-server.crt'
+    )
+
+
 # ============ 정적 파일 서빙 ============
 
 @static_bp.route('/console')
