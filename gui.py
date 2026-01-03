@@ -111,7 +111,7 @@ class UnifiedServerGUI:
         self.static_port_var = tk.IntVar(value=self.config.get("static_port", 11111))
         ttk.Entry(row, textvariable=self.static_port_var, width=6).pack(side=tk.LEFT)
 
-        ttk.Button(row, text="Console", command=lambda: webbrowser.open(f"https://localhost:{self.static_port_var.get()}/console")).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(row, text="Console", command=lambda: webbrowser.open(f"http://localhost:{self.static_port_var.get()}/console")).pack(side=tk.RIGHT, padx=2)
         self.static_stop_btn = ttk.Button(row, text="Stop", command=self._stop_static, state=tk.DISABLED)
         self.static_stop_btn.pack(side=tk.RIGHT, padx=2)
         self.static_start_btn = ttk.Button(row, text="Start", command=self._start_static)
@@ -593,7 +593,7 @@ class UnifiedServerGUI:
                 APP_NAME,
                 menu=pystray.Menu(
                     pystray.MenuItem("Show", on_show, default=True),
-                    pystray.MenuItem("Static Console", lambda: webbrowser.open(f"https://localhost:{self.static_port_var.get()}/console")),
+                    pystray.MenuItem("Static Console", lambda: webbrowser.open(f"http://localhost:{self.static_port_var.get()}/console")),
                     pystray.MenuItem("MSSQL Console", lambda: webbrowser.open(f"http://localhost:{self.mssql_port_var.get()}")),
                     pystray.MenuItem("SQLite Console", lambda: webbrowser.open(f"http://localhost:{self.sqlite_port_var.get()}")),
                     pystray.Menu.SEPARATOR,
@@ -710,36 +710,55 @@ class UnifiedServerGUI:
             return
 
         port = self.static_port_var.get()
+        https_port = port + 332  # 11111 -> 11443
         set_www_folder(www_folder)
 
         self.static_app = Flask(__name__)
         CORS(self.static_app)
         self.static_app.register_blueprint(static_bp)
 
-        # HTTPS 서버 (iOS 녹음 지원)
-        def run():
+        # HTTP 서버 (PC용)
+        def run_http():
             self.static_running = True
+            try:
+                from waitress import serve
+                git_build.log(f"HTTP 서버 시작 (포트: {port})")
+                serve(
+                    self.static_app,
+                    host='0.0.0.0',
+                    port=port,
+                    threads=4,
+                    connection_limit=50,
+                    channel_timeout=120,
+                    expose_tracebacks=False,
+                    ident='Haniwon-Static'
+                )
+            except ImportError:
+                git_build.log(f"Flask HTTP 서버 시작 (포트: {port})")
+                self.static_app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
+
+        # HTTPS 서버 (iOS용)
+        def run_https():
             try:
                 from services.ssl_utils import get_ssl_context
                 ssl_context = get_ssl_context()
 
                 if ssl_context:
-                    git_build.log(f"HTTPS 서버 시작 (포트: {port})")
+                    git_build.log(f"HTTPS 서버 시작 (포트: {https_port}) - iOS용")
                     self.static_app.run(
                         host='0.0.0.0',
-                        port=port,
+                        port=https_port,
                         ssl_context=ssl_context,
                         threaded=True,
                         use_reloader=False
                     )
                 else:
-                    # SSL 실패 시 HTTP fallback
-                    git_build.log(f"HTTP 서버 시작 (포트: {port}) - SSL 인증서 생성 실패")
-                    self.static_app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
+                    git_build.log("HTTPS 인증서 생성 실패")
             except Exception as e:
-                git_build.log(f"서버 오류: {e}")
+                git_build.log(f"HTTPS 서버 오류: {e}")
 
-        threading.Thread(target=run, daemon=True).start()
+        threading.Thread(target=run_http, daemon=True).start()
+        threading.Thread(target=run_https, daemon=True).start()
 
         self.static_status_var.set("Running")
         self.static_status_label.configure(foreground="green")
