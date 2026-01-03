@@ -5,13 +5,21 @@ SSL 인증서 유틸리티
 """
 
 import os
+import sys
 import ssl
 import ipaddress
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# 인증서 저장 경로
-CERT_DIR = Path(__file__).parent.parent / "certs"
+# 인증서 저장 경로 (exe 실행 시 exe 위치 기준)
+if getattr(sys, 'frozen', False):
+    # PyInstaller exe
+    APP_DIR = Path(sys.executable).parent
+else:
+    # 개발 환경
+    APP_DIR = Path(__file__).parent.parent
+
+CERT_DIR = APP_DIR / "certs"
 CERT_FILE = CERT_DIR / "server.crt"
 KEY_FILE = CERT_DIR / "server.key"
 
