@@ -139,7 +139,14 @@ def get_ssl_context():
         # TLS 1.2 이상 사용 (iOS Safari 호환성)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
+
+        # iOS Safari 호환 설정
+        context.options |= ssl.OP_NO_SSLv2
+        context.options |= ssl.OP_NO_SSLv3
+        context.options |= ssl.OP_NO_RENEGOTIATION  # 재협상 비활성화
+
         context.load_cert_chain(cert_file, key_file)
+        print(f"[SSL] SSL Context 생성 완료 (TLS 1.2+, 재협상 비활성화)")
         return context
     except Exception as e:
         print(f"[SSL] SSL Context 생성 실패: {e}")
