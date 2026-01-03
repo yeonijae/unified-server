@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "3.1.4"  # HTTPS 서버 추가 (iOS 녹음 지원)
+APP_VERSION = "3.1.5"  # iOS HTTPS 인증서 설치 지원
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
