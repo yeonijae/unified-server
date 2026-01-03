@@ -6,6 +6,7 @@ SSL 인증서 유틸리티
 
 import os
 import ssl
+import ipaddress
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -62,11 +63,15 @@ def ensure_cert_exists():
                 x509.SubjectAlternativeName([
                     x509.DNSName("localhost"),
                     x509.DNSName("*.local"),
+                    x509.DNSName("haniwon-server"),
                     x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
                     x509.IPAddress(ipaddress.IPv4Address("192.168.0.173")),
-                    x509.IPAddress(ipaddress.IPv4Network("192.168.0.0/24")),
                 ]),
                 critical=False,
+            )
+            .add_extension(
+                x509.BasicConstraints(ca=True, path_length=0),
+                critical=True,
             )
             .sign(key, hashes.SHA256(), default_backend())
         )
@@ -116,20 +121,18 @@ def _generate_with_openssl():
 
 
 def get_ssl_context():
-    """SSL Context 반환"""
+    """SSL Context 반환 (iOS Safari 호환)"""
     cert_file, key_file = ensure_cert_exists()
 
     if not cert_file or not key_file:
         return None
 
     try:
+        # TLS 1.2 이상 사용 (iOS Safari 호환성)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(cert_file, key_file)
         return context
     except Exception as e:
         print(f"[SSL] SSL Context 생성 실패: {e}")
         return None
-
-
-# ipaddress import (상단에서 사용)
-import ipaddress
