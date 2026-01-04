@@ -1,6 +1,6 @@
 """
 Haniwon Unified Server GUI
-- 3개 서버 (Static, MSSQL, SQLite) 관리
+- 3개 서버 (Static, MSSQL, PostgreSQL) 관리
 - 각 서버별 Auto Start, Log
 - Windows 시작프로그램 등록
 """
@@ -9,14 +9,13 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
 import webbrowser
-import sqlite3
 from pathlib import Path
 
 from config import (
-    APP_VERSION, VERSION, APP_NAME, APP_DIR, DEFAULT_DB_FILE,
+    APP_VERSION, VERSION, APP_NAME, APP_DIR,
     load_config, save_config, is_startup_enabled, set_startup_enabled
 )
-from services import mssql_db, sqlite_db, git_build
+from services import mssql_db, postgres_db, git_build
 from services.server_manager import HealthMonitor, get_health_monitor
 
 
@@ -31,19 +30,19 @@ class UnifiedServerGUI:
         # 서버 상태
         self.static_running = False
         self.mssql_running = False
-        self.sqlite_running = False
+        self.postgres_running = False
 
         # Flask 앱 참조
         self.static_app = None
         self.mssql_app = None
-        self.sqlite_app = None
+        self.postgres_app = None
 
         # 로그 텍스트 위젯 (나중에 생성)
         self.static_log = None
         self.mssql_log = None
-        self.sqlite_log = None
+        self.postgres_log = None
 
-        # MSSQL → SQLite 대기열 동기화 스레드
+        # MSSQL → PostgreSQL 대기열 동기화 스레드
         self.waiting_sync_running = False
         self.waiting_sync_thread = None
 
@@ -83,7 +82,7 @@ class UnifiedServerGUI:
         # 탭 생성
         self._create_static_tab(notebook)
         self._create_mssql_tab(notebook)
-        self._create_sqlite_tab(notebook)
+        self._create_postgres_tab(notebook)
         self._create_upload_tab(notebook)
         self._create_webhook_tab(notebook)
         self._create_apikey_tab(notebook)
@@ -266,86 +265,85 @@ class UnifiedServerGUI:
         ttk.Button(log_btn_row, text="Clear", command=lambda: self._clear_log(self.mssql_log)).pack(side=tk.RIGHT)
         ttk.Button(log_btn_row, text="Save Settings", command=self._save_mssql_settings).pack(side=tk.RIGHT, padx=5)
 
-    # ============ SQLite 탭 ============
-    def _create_sqlite_tab(self, notebook):
+    # ============ PostgreSQL 탭 ============
+    def _create_postgres_tab(self, notebook):
         tab = ttk.Frame(notebook, padding=10)
-        notebook.add(tab, text=" SQLite ")
+        notebook.add(tab, text=" PostgreSQL ")
 
         # 서버 상태 + 포트 + 버튼 (한 줄)
-        server_frame = ttk.LabelFrame(tab, text="SQLite API Server", padding=8)
+        server_frame = ttk.LabelFrame(tab, text="PostgreSQL API Server", padding=8)
         server_frame.pack(fill=tk.X, pady=(0, 8))
 
         row = ttk.Frame(server_frame)
         row.pack(fill=tk.X)
 
-        self.sqlite_status_var = tk.StringVar(value="Stopped")
-        self.sqlite_status_label = ttk.Label(row, textvariable=self.sqlite_status_var, font=('Segoe UI', 10, 'bold'), foreground="red", width=8)
-        self.sqlite_status_label.pack(side=tk.LEFT)
+        self.postgres_status_var = tk.StringVar(value="Stopped")
+        self.postgres_status_label = ttk.Label(row, textvariable=self.postgres_status_var, font=('Segoe UI', 10, 'bold'), foreground="red", width=8)
+        self.postgres_status_label.pack(side=tk.LEFT)
 
         ttk.Label(row, text="Port:").pack(side=tk.LEFT, padx=(10, 2))
-        self.sqlite_port_var = tk.IntVar(value=self.config.get("sqlite_api_port", 3200))
-        ttk.Entry(row, textvariable=self.sqlite_port_var, width=6).pack(side=tk.LEFT)
+        self.postgres_port_var = tk.IntVar(value=self.config.get("postgres_api_port", 3200))
+        ttk.Entry(row, textvariable=self.postgres_port_var, width=6).pack(side=tk.LEFT)
 
-        ttk.Button(row, text="Console", command=lambda: webbrowser.open(f"http://localhost:{self.sqlite_port_var.get()}")).pack(side=tk.RIGHT, padx=2)
-        self.sqlite_stop_btn = ttk.Button(row, text="Stop", command=self._stop_sqlite, state=tk.DISABLED)
-        self.sqlite_stop_btn.pack(side=tk.RIGHT, padx=2)
-        self.sqlite_start_btn = ttk.Button(row, text="Start", command=self._start_sqlite)
-        self.sqlite_start_btn.pack(side=tk.RIGHT, padx=2)
+        ttk.Button(row, text="Console", command=lambda: webbrowser.open(f"http://localhost:{self.postgres_port_var.get()}")).pack(side=tk.RIGHT, padx=2)
+        self.postgres_stop_btn = ttk.Button(row, text="Stop", command=self._stop_postgres, state=tk.DISABLED)
+        self.postgres_stop_btn.pack(side=tk.RIGHT, padx=2)
+        self.postgres_start_btn = ttk.Button(row, text="Start", command=self._start_postgres)
+        self.postgres_start_btn.pack(side=tk.RIGHT, padx=2)
 
-        # 데이터베이스 파일
-        db_frame = ttk.LabelFrame(tab, text="Database File", padding=8)
+        # 데이터베이스 연결 정보
+        db_frame = ttk.LabelFrame(tab, text="Database Connection", padding=8)
         db_frame.pack(fill=tk.X, pady=(0, 8))
 
-        db_row = ttk.Frame(db_frame)
-        db_row.pack(fill=tk.X)
-        self.sqlite_path_var = tk.StringVar(value=self.config.get("sqlite_db_path", ""))
-        ttk.Entry(db_row, textvariable=self.sqlite_path_var, width=40).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(db_row, text="Browse", command=self._browse_sqlite_db).pack(side=tk.LEFT, padx=(5, 0))
+        pg_config = self.config.get("postgres", {})
 
-        db_btn_row = ttk.Frame(db_frame)
-        db_btn_row.pack(fill=tk.X, pady=(5, 0))
-        ttk.Button(db_btn_row, text="Create New", command=self._create_sqlite_db).pack(side=tk.LEFT, padx=2)
-        ttk.Button(db_btn_row, text="Run SQL...", command=self._run_sql_file).pack(side=tk.LEFT, padx=2)
+        row1 = ttk.Frame(db_frame)
+        row1.pack(fill=tk.X, pady=2)
+        ttk.Label(row1, text="Host:", width=10).pack(side=tk.LEFT)
+        self.pg_host_var = tk.StringVar(value=pg_config.get("host", "192.168.0.173"))
+        ttk.Entry(row1, textvariable=self.pg_host_var, width=20).pack(side=tk.LEFT)
+        ttk.Label(row1, text="Port:").pack(side=tk.LEFT, padx=(10, 2))
+        self.pg_port_var = tk.IntVar(value=pg_config.get("port", 5432))
+        ttk.Entry(row1, textvariable=self.pg_port_var, width=6).pack(side=tk.LEFT)
 
-        # 백업 설정
-        backup_frame = ttk.LabelFrame(tab, text="Backup", padding=8)
-        backup_frame.pack(fill=tk.X, pady=(0, 8))
+        row2 = ttk.Frame(db_frame)
+        row2.pack(fill=tk.X, pady=2)
+        ttk.Label(row2, text="Database:", width=10).pack(side=tk.LEFT)
+        self.pg_database_var = tk.StringVar(value=pg_config.get("database", "haniwon"))
+        ttk.Entry(row2, textvariable=self.pg_database_var, width=20).pack(side=tk.LEFT)
 
-        backup_row1 = ttk.Frame(backup_frame)
-        backup_row1.pack(fill=tk.X)
-        self.backup_enabled_var = tk.BooleanVar(value=self.config.get("backup_enabled", False))
-        ttk.Checkbutton(backup_row1, text="Auto Backup", variable=self.backup_enabled_var).pack(side=tk.LEFT)
-        self.backup_interval_var = tk.IntVar(value=self.config.get("backup_interval_hours", 24))
-        ttk.Label(backup_row1, text="Every").pack(side=tk.LEFT, padx=(10, 2))
-        ttk.Entry(backup_row1, textvariable=self.backup_interval_var, width=4).pack(side=tk.LEFT)
-        ttk.Label(backup_row1, text="hours").pack(side=tk.LEFT, padx=2)
-        ttk.Button(backup_row1, text="Backup Now", command=self._manual_backup).pack(side=tk.RIGHT)
+        row3 = ttk.Frame(db_frame)
+        row3.pack(fill=tk.X, pady=2)
+        ttk.Label(row3, text="User:", width=10).pack(side=tk.LEFT)
+        self.pg_user_var = tk.StringVar(value=pg_config.get("user", "haniwon_user"))
+        ttk.Entry(row3, textvariable=self.pg_user_var, width=20).pack(side=tk.LEFT)
+        ttk.Label(row3, text="Password:").pack(side=tk.LEFT, padx=(10, 2))
+        self.pg_password_var = tk.StringVar(value=pg_config.get("password", ""))
+        ttk.Entry(row3, textvariable=self.pg_password_var, width=15, show="*").pack(side=tk.LEFT)
 
-        backup_row2 = ttk.Frame(backup_frame)
-        backup_row2.pack(fill=tk.X, pady=(5, 0))
-        ttk.Label(backup_row2, text="Folder:").pack(side=tk.LEFT)
-        self.backup_folder_var = tk.StringVar(value=self.config.get("backup_folder", ""))
-        ttk.Entry(backup_row2, textvariable=self.backup_folder_var, width=35).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        ttk.Button(backup_row2, text="Browse", command=self._browse_backup_folder).pack(side=tk.LEFT, padx=(2, 0))
+        row4 = ttk.Frame(db_frame)
+        row4.pack(fill=tk.X, pady=(5, 0))
+        ttk.Button(row4, text="Test Connection", command=self._test_postgres_connection).pack(side=tk.LEFT)
+        ttk.Button(row4, text="Save Connection", command=self._save_postgres_connection).pack(side=tk.LEFT, padx=5)
 
         # 옵션
-        self.sqlite_auto_start_var = tk.BooleanVar(value=self.config.get("sqlite_auto_start", False))
-        ttk.Checkbutton(tab, text="Auto start on startup", variable=self.sqlite_auto_start_var).pack(anchor=tk.W)
+        self.postgres_auto_start_var = tk.BooleanVar(value=self.config.get("postgres_auto_start", False))
+        ttk.Checkbutton(tab, text="Auto start on startup", variable=self.postgres_auto_start_var).pack(anchor=tk.W)
 
         # 로그
         log_frame = ttk.LabelFrame(tab, text="Log", padding=5)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
 
-        self.sqlite_log = tk.Text(log_frame, height=5, font=('Consolas', 9), bg='#1e1e1e', fg='#10b981', state=tk.DISABLED)
-        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.sqlite_log.yview)
-        self.sqlite_log.configure(yscrollcommand=scrollbar.set)
+        self.postgres_log = tk.Text(log_frame, height=5, font=('Consolas', 9), bg='#1e1e1e', fg='#3b82f6', state=tk.DISABLED)
+        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.postgres_log.yview)
+        self.postgres_log.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.sqlite_log.pack(fill=tk.BOTH, expand=True)
+        self.postgres_log.pack(fill=tk.BOTH, expand=True)
 
         log_btn_row = ttk.Frame(log_frame)
         log_btn_row.pack(fill=tk.X, pady=(3, 0))
-        ttk.Button(log_btn_row, text="Clear", command=lambda: self._clear_log(self.sqlite_log)).pack(side=tk.RIGHT)
-        ttk.Button(log_btn_row, text="Save Settings", command=self._save_sqlite_settings).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(log_btn_row, text="Clear", command=lambda: self._clear_log(self.postgres_log)).pack(side=tk.RIGHT)
+        ttk.Button(log_btn_row, text="Save Settings", command=self._save_postgres_settings).pack(side=tk.RIGHT, padx=5)
 
     # ============ Upload 탭 ============
     def _create_upload_tab(self, notebook):
@@ -396,10 +394,10 @@ class UnifiedServerGUI:
         ttk.Entry(ext_row, textvariable=self.allowed_ext_var, width=40).pack(side=tk.LEFT, padx=5)
 
         # API 정보
-        api_frame = ttk.LabelFrame(tab, text="File API Endpoints (SQLite Server)", padding=8)
+        api_frame = ttk.LabelFrame(tab, text="File API Endpoints (PostgreSQL Server)", padding=8)
         api_frame.pack(fill=tk.X, pady=(0, 10))
 
-        port = self.config.get("sqlite_api_port", 3200)
+        port = self.config.get("postgres_api_port", 3200)
         endpoints = [
             ("POST", f"/api/files/upload", "파일 업로드"),
             ("GET", f"/api/files/<path>", "파일 다운로드"),
@@ -555,7 +553,7 @@ class UnifiedServerGUI:
         git_build.log_callback = make_log_callback(self.static_log)
         git_build.mssql_log_callback = make_log_callback(self.mssql_log)  # MSSQL self-update 로그
         mssql_db.log_callback = make_log_callback(self.mssql_log)
-        sqlite_db.log_callback = make_log_callback(self.sqlite_log)
+        postgres_db.log_callback = make_log_callback(self.postgres_log)
 
     def _append_log(self, log_widget, message):
         log_widget.configure(state=tk.NORMAL)
@@ -595,7 +593,7 @@ class UnifiedServerGUI:
                     pystray.MenuItem("Show", on_show, default=True),
                     pystray.MenuItem("Static Console", lambda: webbrowser.open(f"http://localhost:{self.static_port_var.get()}/console")),
                     pystray.MenuItem("MSSQL Console", lambda: webbrowser.open(f"http://localhost:{self.mssql_port_var.get()}")),
-                    pystray.MenuItem("SQLite Console", lambda: webbrowser.open(f"http://localhost:{self.sqlite_port_var.get()}")),
+                    pystray.MenuItem("PostgreSQL Console", lambda: webbrowser.open(f"http://localhost:{self.postgres_port_var.get()}")),
                     pystray.Menu.SEPARATOR,
                     pystray.MenuItem("Quit", on_quit)
                 )
@@ -620,31 +618,6 @@ class UnifiedServerGUI:
         path = filedialog.askdirectory(title="Select Project Folder")
         if path:
             self.www_folder_var.set(path)
-
-    def _browse_sqlite_db(self):
-        path = filedialog.askopenfilename(
-            title="Select SQLite Database",
-            filetypes=[("SQLite files", "*.sqlite *.db"), ("All files", "*.*")]
-        )
-        if path:
-            self.sqlite_path_var.set(path)
-
-    def _browse_backup_folder(self):
-        path = filedialog.askdirectory(title="Select Backup Folder")
-        if path:
-            self.backup_folder_var.set(path)
-
-    def _create_sqlite_db(self):
-        path = filedialog.asksaveasfilename(
-            title="Create New Database",
-            defaultextension=".sqlite",
-            filetypes=[("SQLite files", "*.sqlite"), ("All files", "*.*")]
-        )
-        if path:
-            conn = sqlite3.connect(path)
-            conn.close()
-            self.sqlite_path_var.set(path)
-            messagebox.showinfo("Success", f"Database created:\n{path}")
 
     def _toggle_webhook_secret(self):
         current = self.webhook_secret_entry.cget('show')
@@ -983,165 +956,117 @@ class UnifiedServerGUI:
         save_config(self.config)
         messagebox.showinfo("Success", "MSSQL settings saved")
 
-    # ============ 서버 제어: SQLite ============
-    def _start_sqlite(self):
+    # ============ 서버 제어: PostgreSQL ============
+    def _start_postgres(self):
         from flask import Flask
         from flask_cors import CORS
-        from routes.sqlite_routes import sqlite_bp
+        from routes.postgres_routes import postgres_bp
         from routes.file_routes import file_bp
 
-        db_path = self.sqlite_path_var.get()
-        if not db_path:
-            messagebox.showerror("Error", "SQLite DB 파일을 선택해주세요.")
+        # 연결 테스트
+        result = postgres_db.test_connection()
+        if not result.get('success'):
+            messagebox.showerror("Error", f"PostgreSQL 연결 실패:\n{result.get('error', 'Unknown error')}")
             return
 
-        if not Path(db_path).exists():
-            if messagebox.askyesno("Create?", f"파일이 없습니다. 생성할까요?\n{db_path}"):
-                conn = sqlite3.connect(db_path)
-                conn.close()
-            else:
-                return
+        port = self.postgres_port_var.get()
 
-        sqlite_db.set_db_path(db_path)
-        port = self.sqlite_port_var.get()
-
-        self.sqlite_app = Flask(__name__)
-        CORS(self.sqlite_app, resources={
+        self.postgres_app = Flask(__name__)
+        CORS(self.postgres_app, resources={
             r"/api/*": {
                 "origins": "*",
                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                 "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"]
             }
         })
-        self.sqlite_app.register_blueprint(sqlite_bp)
-        self.sqlite_app.register_blueprint(file_bp)
+        self.postgres_app.register_blueprint(postgres_bp)
+        self.postgres_app.register_blueprint(file_bp)
 
         def run():
-            self.sqlite_running = True
-            sqlite_db.log(f"DB: {db_path}", force=True)
+            self.postgres_running = True
+            config = postgres_db.get_db_config()
+            postgres_db.log(f"DB: {config.get('host')}:{config.get('port')}/{config.get('database')}", force=True)
             try:
                 from waitress import serve
-                sqlite_db.log(f"Waitress 서버 시작 (포트: {port})", force=True)
+                postgres_db.log(f"Waitress 서버 시작 (포트: {port})", force=True)
                 serve(
-                    self.sqlite_app,
+                    self.postgres_app,
                     host='0.0.0.0',
                     port=port,
                     threads=4,
                     connection_limit=50,
                     channel_timeout=120,
                     expose_tracebacks=False,
-                    ident='Haniwon-SQLite'
+                    ident='Haniwon-PostgreSQL'
                 )
             except ImportError:
-                sqlite_db.log(f"Flask 서버 시작 (포트: {port}) - Waitress 미설치", force=True)
-                self.sqlite_app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
+                postgres_db.log(f"Flask 서버 시작 (포트: {port}) - Waitress 미설치", force=True)
+                self.postgres_app.run(host='0.0.0.0', port=port, threaded=True, use_reloader=False)
 
         threading.Thread(target=run, daemon=True).start()
 
-        self.sqlite_status_var.set("Running")
-        self.sqlite_status_label.configure(foreground="green")
-        self.sqlite_start_btn.configure(state=tk.DISABLED)
-        self.sqlite_stop_btn.configure(state=tk.NORMAL)
-
-        sqlite_db.start_backup_scheduler()
+        self.postgres_status_var.set("Running")
+        self.postgres_status_label.configure(foreground="green")
+        self.postgres_start_btn.configure(state=tk.DISABLED)
+        self.postgres_stop_btn.configure(state=tk.NORMAL)
 
         # 대기열 동기화 체크
         self._check_and_start_waiting_sync()
 
-    def _stop_sqlite(self):
-        self.sqlite_running = False
-        sqlite_db.log("서버 중지됨", force=True)
-        self.sqlite_status_var.set("Stopped")
-        self.sqlite_status_label.configure(foreground="orange")
-        self.sqlite_start_btn.configure(state=tk.NORMAL)
-        self.sqlite_stop_btn.configure(state=tk.DISABLED)
+    def _stop_postgres(self):
+        self.postgres_running = False
+        postgres_db.log("서버 중지됨", force=True)
+        self.postgres_status_var.set("Stopped")
+        self.postgres_status_label.configure(foreground="orange")
+        self.postgres_start_btn.configure(state=tk.NORMAL)
+        self.postgres_stop_btn.configure(state=tk.DISABLED)
 
         # 대기열 동기화 중지
         self._check_and_start_waiting_sync()
 
-    def _manual_backup(self):
-        if not sqlite_db.get_db_path():
-            messagebox.showerror("Error", "서버가 실행 중이 아니거나 DB가 설정되지 않았습니다.")
-            return
+    def _test_postgres_connection(self):
+        """PostgreSQL 연결 테스트"""
+        # 설정값을 임시로 업데이트
+        self._save_postgres_connection(show_message=False)
+        postgres_db.reload_config()
 
-        result = sqlite_db.do_backup()
-        if result:
-            messagebox.showinfo("Success", "백업이 완료되었습니다.")
+        result = postgres_db.test_connection()
+        if result.get('success'):
+            messagebox.showinfo("Success", "PostgreSQL 연결 성공!")
         else:
-            messagebox.showerror("Error", "백업 실패 또는 설정되지 않음")
+            messagebox.showerror("Error", f"연결 실패:\n{result.get('error', 'Unknown error')}")
 
-    def _run_sql_file(self):
-        db_path = self.sqlite_path_var.get()
-        if not db_path or not Path(db_path).exists():
-            messagebox.showerror("Error", "SQLite DB 파일을 먼저 선택해주세요.")
-            return
-
-        sql_file = filedialog.askopenfilename(
-            title="Select SQL File",
-            filetypes=[("SQL files", "*.sql"), ("All files", "*.*")]
-        )
-        if not sql_file:
-            return
-
-        try:
-            with open(sql_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-            statements = [s.strip() for s in content.split(';') if s.strip() and not s.strip().startswith('--')]
-            stmt_count = len(statements)
-        except Exception as e:
-            messagebox.showerror("Error", f"파일 읽기 실패: {e}")
-            return
-
-        if not messagebox.askyesno("Confirm", f"SQL 파일을 실행하시겠습니까?\n\n파일: {Path(sql_file).name}\n문장 수: {stmt_count}개"):
-            return
-
-        sqlite_db.log(f"SQL 실행 시작: {stmt_count}개 문장", force=True)
-
-        try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-
-            success_count = 0
-            error_count = 0
-
-            for stmt in statements:
-                try:
-                    cursor.execute(stmt)
-                    success_count += 1
-                except:
-                    error_count += 1
-
-            conn.commit()
-            conn.close()
-
-            sqlite_db.log(f"완료: 성공 {success_count}, 실패 {error_count}", force=True)
-            messagebox.showinfo("SQL 실행 완료", f"성공: {success_count}개\n실패: {error_count}개")
-
-        except Exception as e:
-            sqlite_db.log(f"[ERROR] {str(e)}", force=True)
-            messagebox.showerror("Error", str(e))
-
-    def _save_sqlite_settings(self):
-        self.config["sqlite_db_path"] = self.sqlite_path_var.get()
-        self.config["sqlite_api_port"] = self.sqlite_port_var.get()
-        self.config["sqlite_auto_start"] = self.sqlite_auto_start_var.get()
-        self.config["backup_enabled"] = self.backup_enabled_var.get()
-        self.config["backup_folder"] = self.backup_folder_var.get()
-        self.config["backup_interval_hours"] = self.backup_interval_var.get()
+    def _save_postgres_connection(self, show_message=True):
+        """PostgreSQL 연결 설정 저장"""
+        self.config["postgres"] = {
+            "host": self.pg_host_var.get(),
+            "port": self.pg_port_var.get(),
+            "database": self.pg_database_var.get(),
+            "user": self.pg_user_var.get(),
+            "password": self.pg_password_var.get()
+        }
         save_config(self.config)
-        sqlite_db.start_backup_scheduler()
-        messagebox.showinfo("Success", "SQLite settings saved")
+        postgres_db.reload_config()
+        if show_message:
+            messagebox.showinfo("Success", "PostgreSQL 연결 설정 저장됨")
 
-    # ============ MSSQL → SQLite 대기열 동기화 ============
+    def _save_postgres_settings(self):
+        """PostgreSQL 서버 설정 저장"""
+        self.config["postgres_api_port"] = self.postgres_port_var.get()
+        self.config["postgres_auto_start"] = self.postgres_auto_start_var.get()
+        self._save_postgres_connection(show_message=False)
+        messagebox.showinfo("Success", "PostgreSQL settings saved")
+
+    # ============ MSSQL → PostgreSQL 대기열 동기화 ============
     def _start_waiting_sync(self):
-        """MSSQL Waiting → SQLite waiting_queue 백그라운드 동기화 시작"""
+        """MSSQL Waiting → PostgreSQL waiting_queue 백그라운드 동기화 시작"""
         if self.waiting_sync_running:
             return
 
         self.waiting_sync_running = True
         self.waiting_sync_thread = threading.Thread(target=self._waiting_sync_loop, daemon=True)
         self.waiting_sync_thread.start()
-        sqlite_db.log("대기열 동기화 시작 (5초 간격)", force=True)
+        postgres_db.log("대기열 동기화 시작 (5초 간격)", force=True)
 
     def _stop_waiting_sync(self):
         """동기화 중지"""
@@ -1150,9 +1075,9 @@ class UnifiedServerGUI:
             self.waiting_sync_thread = None
 
     def _waiting_sync_loop(self):
-        """10초마다 MSSQL Treating(치료실)을 SQLite waiting_queue에 동기화
+        """10초마다 MSSQL Treating(치료실)을 PostgreSQL waiting_queue에 동기화
 
-        - MSSQL Treating → SQLite waiting_queue (queue_type='treatment')
+        - MSSQL Treating → PostgreSQL waiting_queue (queue_type='treatment')
         - MSSQL Waiting(대기실)은 동기화하지 않음 (CS관리에서 수동 처리)
         """
         import time
@@ -1161,12 +1086,12 @@ class UnifiedServerGUI:
         while self.waiting_sync_running:
             try:
                 # 두 서버가 모두 실행 중인지 확인
-                if not self.mssql_running or not self.sqlite_running:
+                if not self.mssql_running or not self.postgres_running:
                     time.sleep(5)
                     continue
 
                 mssql_port = self.mssql_port_var.get()
-                sqlite_port = self.sqlite_port_var.get()
+                postgres_port = self.postgres_port_var.get()
 
                 # 1. MSSQL에서 치료실(Treating) 목록만 가져오기
                 try:
@@ -1197,15 +1122,15 @@ class UnifiedServerGUI:
                     time.sleep(5)
                     continue
 
-                # 목록이 비어있으면 동기화 스킵 (SQLite 유지)
+                # 목록이 비어있으면 동기화 스킵 (PostgreSQL 유지)
                 if not sync_list:
                     time.sleep(5)
                     continue
 
-                # 2. SQLite에 동기화
+                # 2. PostgreSQL에 동기화
                 try:
                     sync_res = requests.post(
-                        f"http://localhost:{sqlite_port}/api/waiting-queue/sync",
+                        f"http://localhost:{postgres_port}/api/waiting-queue/sync",
                         json={"waiting": sync_list},
                         timeout=5
                     )
@@ -1214,21 +1139,21 @@ class UnifiedServerGUI:
                         result = sync_res.json()
                         added = result.get('added', 0)
                         if added > 0:
-                            sqlite_db.log(f"대기열 동기화: {added}명 추가", force=True)
+                            postgres_db.log(f"대기열 동기화: {added}명 추가", force=True)
 
                 except requests.exceptions.RequestException:
-                    # SQLite 연결 실패 - 조용히 다음 시도
+                    # PostgreSQL 연결 실패 - 조용히 다음 시도
                     pass
 
             except Exception as e:
                 # 예상치 못한 오류 - 로그만 남기고 계속
-                sqlite_db.log(f"대기열 동기화 오류: {e}")
+                postgres_db.log(f"대기열 동기화 오류: {e}")
 
             time.sleep(5)
 
     def _check_and_start_waiting_sync(self):
         """두 서버가 모두 실행 중이면 동기화 시작"""
-        if self.mssql_running and self.sqlite_running:
+        if self.mssql_running and self.postgres_running:
             self._start_waiting_sync()
         else:
             self._stop_waiting_sync()
@@ -1254,14 +1179,10 @@ class UnifiedServerGUI:
             self._start_mssql()
             any_auto_started = True
 
-        if self.sqlite_auto_start_var.get():
-            if DEFAULT_DB_FILE.exists() and not self.sqlite_path_var.get():
-                self.sqlite_path_var.set(str(DEFAULT_DB_FILE))
-
-            if self.sqlite_path_var.get():
-                sqlite_db.log("자동 시작", force=True)
-                self._start_sqlite()
-                any_auto_started = True
+        if self.postgres_auto_start_var.get():
+            postgres_db.log("자동 시작", force=True)
+            self._start_postgres()
+            any_auto_started = True
 
         # Health Monitor 시작 (자동 재시작: 매일 새벽 4시)
         if any_auto_started:

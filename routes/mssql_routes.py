@@ -7,16 +7,51 @@ MSSQL API 라우트
 """
 
 # 모듈 버전 (외부 파일로 배포 시 사용)
-MODULE_VERSION = "2.6.7"
+MODULE_VERSION = "2.6.8"
 
 from datetime import datetime
 import threading
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify, Response, make_response
 from services import mssql_db
 from services import git_build
 from config import VERSION, load_config
 
 mssql_bp = Blueprint('mssql', __name__)
+
+
+# ============ CORS 헬퍼 함수 ============
+
+def add_cors_headers(response):
+    """응답에 CORS 헤더 추가"""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+    response.headers['Access-Control-Max-Age'] = '3600'
+    return response
+
+
+def cors_preflight_response():
+    """OPTIONS preflight 요청에 대한 응답"""
+    response = make_response()
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+    response.headers['Access-Control-Max-Age'] = '3600'
+    return response
+
+
+def json_response(data, status=200):
+    """JSON 응답 + CORS 헤더"""
+    response = make_response(jsonify(data), status)
+    return add_cors_headers(response)
+
+
+# ============ Blueprint 레벨 CORS 처리 ============
+
+@mssql_bp.after_request
+def after_request(response):
+    """모든 응답에 CORS 헤더 추가"""
+    return add_cors_headers(response)
 
 
 # ============ 웹 콘솔 HTML ============
@@ -333,6 +368,66 @@ def get_patient_by_chart(chart_no):
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@mssql_bp.route('/api/patients/by-ids', methods=['GET', 'POST', 'OPTIONS'])
+def get_patients_by_ids():
+    """여러 환자 ID로 일괄 조회"""
+    if request.method == 'OPTIONS':
+        return cors_preflight_response()
+
+    try:
+        conn = mssql_db.get_connection()
+        if not conn:
+            return json_response({"error": "MSSQL 연결 실패"}, 500)
+
+        # POST 또는 GET 파라미터에서 ids 추출
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            patient_ids = data.get('ids', [])
+        else:
+            ids_param = request.args.get('ids', '')
+            patient_ids = [int(x.strip()) for x in ids_param.split(',') if x.strip().isdigit()]
+
+        if not patient_ids:
+            return json_response({"patients": []})
+
+        # IN 절용 파라미터 생성
+        placeholders = ','.join(['%s'] * len(patient_ids))
+
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(f"""
+            SELECT
+              Customer_PK as id,
+              sn as chart_no,
+              name,
+              birth,
+              sex,
+              cell as phone,
+              tel,
+              address,
+              reg_date,
+              recent as last_visit
+            FROM Customer
+            WHERE Customer_PK IN ({placeholders})
+        """, tuple(patient_ids))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        patients = []
+        for row in rows:
+            patients.append({
+                **row,
+                'sex': 'M' if row['sex'] else 'F',
+                'birth': row['birth'].strftime('%Y-%m-%d') if row['birth'] else None,
+                'reg_date': row['reg_date'].strftime('%Y-%m-%d') if row['reg_date'] else None,
+                'last_visit': row['last_visit'].strftime('%Y-%m-%d') if row['last_visit'] else None,
+            })
+
+        return json_response({"patients": patients})
+    except Exception as e:
+        return json_response({"error": str(e)}, 500)
 
 
 @mssql_bp.route('/api/today/registrations')

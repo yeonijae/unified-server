@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "3.1.6"  # HTTPS 별도 Flask 앱 분리
+APP_VERSION = "4.0.0"  # SQLite → PostgreSQL 마이그레이션
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
@@ -48,10 +48,16 @@ DEFAULT_CONFIG = {
         "database": "MasterDB"
     },
 
-    # SQLite API
-    "sqlite_api_port": 3200,
-    "sqlite_auto_start": False,
-    "sqlite_db_path": "",
+    # PostgreSQL API
+    "postgres_api_port": 3200,
+    "postgres_auto_start": False,
+    "postgres": {
+        "host": "192.168.0.173",
+        "port": 5432,
+        "user": "haniwon_user",
+        "password": "",
+        "database": "haniwon"
+    },
     "backup_enabled": False,
     "backup_folder": "",
     "backup_interval_hours": 24,
@@ -102,6 +108,13 @@ def load_config():
             for k, v in DEFAULT_CONFIG['mssql'].items():
                 if k not in config['mssql']:
                     config['mssql'][k] = v
+        # postgres 하위 키 확인
+        if 'postgres' not in config:
+            config['postgres'] = DEFAULT_CONFIG['postgres']
+        else:
+            for k, v in DEFAULT_CONFIG['postgres'].items():
+                if k not in config['postgres']:
+                    config['postgres'][k] = v
         return config
     except:
         pass
