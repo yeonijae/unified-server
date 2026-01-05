@@ -440,7 +440,7 @@ def subscribe_all():
         return cors_preflight_response()
 
     def event_stream():
-        import select
+        import time
         import psycopg2
         from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
@@ -459,16 +459,21 @@ def subscribe_all():
         # 연결 성공 알림
         yield f"data: {{\"type\": \"connected\", \"message\": \"SSE connected\"}}\n\n"
 
+        last_keepalive = time.time()
         try:
             while True:
-                # 5초마다 타임아웃, keepalive 메시지 전송
-                if select.select([conn], [], [], 5) == ([], [], []):
+                # Windows 호환: select 대신 poll + sleep 사용
+                conn.poll()
+                while conn.notifies:
+                    notify = conn.notifies.pop(0)
+                    yield f"data: {notify.payload}\n\n"
+
+                # 5초마다 keepalive 전송
+                if time.time() - last_keepalive >= 5:
                     yield f": keepalive\n\n"
-                else:
-                    conn.poll()
-                    while conn.notifies:
-                        notify = conn.notifies.pop(0)
-                        yield f"data: {notify.payload}\n\n"
+                    last_keepalive = time.time()
+
+                time.sleep(0.1)  # 100ms 간격으로 확인
         except GeneratorExit:
             cur.close()
             conn.close()
@@ -491,7 +496,7 @@ def subscribe_table(table):
         return cors_preflight_response()
 
     def event_stream():
-        import select
+        import time
         import psycopg2
         import json
         from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
@@ -510,21 +515,27 @@ def subscribe_table(table):
 
         yield f"data: {{\"type\": \"connected\", \"table\": \"{table}\"}}\n\n"
 
+        last_keepalive = time.time()
         try:
             while True:
-                if select.select([conn], [], [], 5) == ([], [], []):
+                # Windows 호환: select 대신 poll + sleep 사용
+                conn.poll()
+                while conn.notifies:
+                    notify = conn.notifies.pop(0)
+                    try:
+                        payload = json.loads(notify.payload)
+                        # 해당 테이블만 필터링
+                        if payload.get('table') == table:
+                            yield f"data: {notify.payload}\n\n"
+                    except:
+                        pass
+
+                # 5초마다 keepalive 전송
+                if time.time() - last_keepalive >= 5:
                     yield f": keepalive\n\n"
-                else:
-                    conn.poll()
-                    while conn.notifies:
-                        notify = conn.notifies.pop(0)
-                        try:
-                            payload = json.loads(notify.payload)
-                            # 해당 테이블만 필터링
-                            if payload.get('table') == table:
-                                yield f"data: {notify.payload}\n\n"
-                        except:
-                            pass
+                    last_keepalive = time.time()
+
+                time.sleep(0.1)  # 100ms 간격으로 확인
         except GeneratorExit:
             cur.close()
             conn.close()
