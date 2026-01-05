@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "4.0.0"  # SQLite → PostgreSQL 마이그레이션
+APP_VERSION = "4.1.0"  # SSE 실시간 동기화 추가
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)

@@ -429,3 +429,112 @@ def delete_row(name):
         })
     except Exception as e:
         return json_response({"error": str(e)}, 400)
+
+
+# ============ SSE (Server-Sent Events) 실시간 스트림 ============
+
+@postgres_bp.route('/api/subscribe', methods=['GET', 'OPTIONS'])
+def subscribe_all():
+    """모든 테이블 변경사항 구독 (SSE)"""
+    if request.method == 'OPTIONS':
+        return cors_preflight_response()
+
+    def event_stream():
+        import select
+        import psycopg2
+        from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+
+        config = postgres_db.get_db_config()
+        conn = psycopg2.connect(
+            host=config.get('host', 'localhost'),
+            port=config.get('port', 5432),
+            user=config.get('user', ''),
+            password=config.get('password', ''),
+            database=config.get('database', ''),
+        )
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cur = conn.cursor()
+        cur.execute("LISTEN table_changes")
+
+        # 연결 성공 알림
+        yield f"data: {{\"type\": \"connected\", \"message\": \"SSE connected\"}}\n\n"
+
+        try:
+            while True:
+                # 5초마다 타임아웃, keepalive 메시지 전송
+                if select.select([conn], [], [], 5) == ([], [], []):
+                    yield f": keepalive\n\n"
+                else:
+                    conn.poll()
+                    while conn.notifies:
+                        notify = conn.notifies.pop(0)
+                        yield f"data: {notify.payload}\n\n"
+        except GeneratorExit:
+            cur.close()
+            conn.close()
+        except Exception as e:
+            yield f"data: {{\"type\": \"error\", \"message\": \"{str(e)}\"}}\n\n"
+            cur.close()
+            conn.close()
+
+    response = Response(event_stream(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return add_cors_headers(response)
+
+
+@postgres_bp.route('/api/subscribe/<table>', methods=['GET', 'OPTIONS'])
+def subscribe_table(table):
+    """특정 테이블 변경사항만 구독 (SSE)"""
+    if request.method == 'OPTIONS':
+        return cors_preflight_response()
+
+    def event_stream():
+        import select
+        import psycopg2
+        import json
+        from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+
+        config = postgres_db.get_db_config()
+        conn = psycopg2.connect(
+            host=config.get('host', 'localhost'),
+            port=config.get('port', 5432),
+            user=config.get('user', ''),
+            password=config.get('password', ''),
+            database=config.get('database', ''),
+        )
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cur = conn.cursor()
+        cur.execute("LISTEN table_changes")
+
+        yield f"data: {{\"type\": \"connected\", \"table\": \"{table}\"}}\n\n"
+
+        try:
+            while True:
+                if select.select([conn], [], [], 5) == ([], [], []):
+                    yield f": keepalive\n\n"
+                else:
+                    conn.poll()
+                    while conn.notifies:
+                        notify = conn.notifies.pop(0)
+                        try:
+                            payload = json.loads(notify.payload)
+                            # 해당 테이블만 필터링
+                            if payload.get('table') == table:
+                                yield f"data: {notify.payload}\n\n"
+                        except:
+                            pass
+        except GeneratorExit:
+            cur.close()
+            conn.close()
+        except Exception as e:
+            yield f"data: {{\"type\": \"error\", \"message\": \"{str(e)}\"}}\n\n"
+            cur.close()
+            conn.close()
+
+    response = Response(event_stream(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return add_cors_headers(response)
