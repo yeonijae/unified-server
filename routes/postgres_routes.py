@@ -433,34 +433,72 @@ def delete_row(name):
 
 # ============ SSE (Server-Sent Events) 실시간 스트림 ============
 
+@postgres_bp.route('/api/sse-test', methods=['GET'])
+def sse_test():
+    """SSE 기본 테스트 (DB 연결 없이)"""
+    def event_stream():
+        import time
+        yield f"data: {{\"type\": \"connected\", \"message\": \"SSE test\"}}\n\n"
+        for i in range(3):
+            time.sleep(1)
+            yield f"data: {{\"count\": {i}}}\n\n"
+        yield f"data: {{\"type\": \"done\"}}\n\n"
+
+    response = Response(event_stream(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return add_cors_headers(response)
+
+
 @postgres_bp.route('/api/subscribe', methods=['GET', 'OPTIONS'])
 def subscribe_all():
     """모든 테이블 변경사항 구독 (SSE)"""
     if request.method == 'OPTIONS':
         return cors_preflight_response()
 
-    def event_stream():
-        import time
-        import psycopg2
-        from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+    import time
+    import psycopg2
+    from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-        config = postgres_db.get_db_config()
-        conn = psycopg2.connect(
+    # DB 연결을 먼저 테스트
+    config = postgres_db.get_db_config()
+    postgres_db.log(f"[SSE] 연결 시도: {config.get('host')}:{config.get('port')}", force=True)
+
+    try:
+        test_conn = psycopg2.connect(
             host=config.get('host', 'localhost'),
             port=config.get('port', 5432),
             user=config.get('user', ''),
             password=config.get('password', ''),
             database=config.get('database', ''),
+            connect_timeout=5
         )
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cur = conn.cursor()
-        cur.execute("LISTEN table_changes")
+        test_conn.close()
+        postgres_db.log("[SSE] DB 연결 테스트 성공", force=True)
+    except Exception as e:
+        postgres_db.log(f"[SSE] DB 연결 테스트 실패: {str(e)}", force=True)
+        return json_response({"error": f"DB connection failed: {str(e)}"}, 500)
 
-        # 연결 성공 알림
-        yield f"data: {{\"type\": \"connected\", \"message\": \"SSE connected\"}}\n\n"
-
-        last_keepalive = time.time()
+    def event_stream():
+        conn = None
+        cur = None
         try:
+            conn = psycopg2.connect(
+                host=config.get('host', 'localhost'),
+                port=config.get('port', 5432),
+                user=config.get('user', ''),
+                password=config.get('password', ''),
+                database=config.get('database', ''),
+            )
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cur = conn.cursor()
+            cur.execute("LISTEN table_changes")
+            postgres_db.log("[SSE] LISTEN 성공", force=True)
+
+            # 연결 성공 알림
+            yield f"data: {{\"type\": \"connected\", \"message\": \"SSE connected\"}}\n\n"
+
+            last_keepalive = time.time()
             while True:
                 # Windows 호환: select 대신 poll + sleep 사용
                 conn.poll()
@@ -475,12 +513,15 @@ def subscribe_all():
 
                 time.sleep(0.1)  # 100ms 간격으로 확인
         except GeneratorExit:
-            cur.close()
-            conn.close()
+            postgres_db.log("[SSE] 클라이언트 연결 종료", force=True)
         except Exception as e:
+            postgres_db.log(f"[SSE] 에러: {str(e)}", force=True)
             yield f"data: {{\"type\": \"error\", \"message\": \"{str(e)}\"}}\n\n"
-            cur.close()
-            conn.close()
+        finally:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
 
     response = Response(event_stream(), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
@@ -495,35 +536,52 @@ def subscribe_table(table):
     if request.method == 'OPTIONS':
         return cors_preflight_response()
 
-    def event_stream():
-        import time
-        import psycopg2
-        import json
-        from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+    import time
+    import psycopg2
+    import json as json_lib
+    from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-        config = postgres_db.get_db_config()
-        conn = psycopg2.connect(
+    # DB 연결을 먼저 테스트
+    config = postgres_db.get_db_config()
+    try:
+        test_conn = psycopg2.connect(
             host=config.get('host', 'localhost'),
             port=config.get('port', 5432),
             user=config.get('user', ''),
             password=config.get('password', ''),
             database=config.get('database', ''),
+            connect_timeout=5
         )
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cur = conn.cursor()
-        cur.execute("LISTEN table_changes")
+        test_conn.close()
+    except Exception as e:
+        postgres_db.log(f"[SSE] DB 연결 테스트 실패: {str(e)}", force=True)
+        return json_response({"error": f"DB connection failed: {str(e)}"}, 500)
 
-        yield f"data: {{\"type\": \"connected\", \"table\": \"{table}\"}}\n\n"
-
-        last_keepalive = time.time()
+    def event_stream():
+        conn = None
+        cur = None
         try:
+            conn = psycopg2.connect(
+                host=config.get('host', 'localhost'),
+                port=config.get('port', 5432),
+                user=config.get('user', ''),
+                password=config.get('password', ''),
+                database=config.get('database', ''),
+            )
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            cur = conn.cursor()
+            cur.execute("LISTEN table_changes")
+
+            yield f"data: {{\"type\": \"connected\", \"table\": \"{table}\"}}\n\n"
+
+            last_keepalive = time.time()
             while True:
                 # Windows 호환: select 대신 poll + sleep 사용
                 conn.poll()
                 while conn.notifies:
                     notify = conn.notifies.pop(0)
                     try:
-                        payload = json.loads(notify.payload)
+                        payload = json_lib.loads(notify.payload)
                         # 해당 테이블만 필터링
                         if payload.get('table') == table:
                             yield f"data: {notify.payload}\n\n"
@@ -537,12 +595,15 @@ def subscribe_table(table):
 
                 time.sleep(0.1)  # 100ms 간격으로 확인
         except GeneratorExit:
-            cur.close()
-            conn.close()
+            postgres_db.log("[SSE] 클라이언트 연결 종료", force=True)
         except Exception as e:
+            postgres_db.log(f"[SSE] 에러: {str(e)}", force=True)
             yield f"data: {{\"type\": \"error\", \"message\": \"{str(e)}\"}}\n\n"
-            cur.close()
-            conn.close()
+        finally:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
 
     response = Response(event_stream(), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
