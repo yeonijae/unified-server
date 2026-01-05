@@ -8,7 +8,7 @@ PostgreSQL API 라우트
 import time
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-from flask import Blueprint, request, jsonify, Response, make_response
+from flask import Blueprint, request, jsonify, Response, make_response, stream_with_context
 from services import postgres_db
 from config import VERSION, load_config
 
@@ -527,7 +527,7 @@ def subscribe_all():
                 conn.close()
 
     postgres_db.log("[SSE] Response 생성 중", force=True)
-    response = Response(event_stream(), mimetype='text/event-stream')
+    response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['Connection'] = 'keep-alive'
     response.headers['X-Accel-Buffering'] = 'no'
@@ -607,7 +607,7 @@ def subscribe_table(table):
             if conn:
                 conn.close()
 
-    response = Response(event_stream(), mimetype='text/event-stream')
+    response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['Connection'] = 'keep-alive'
     response.headers['X-Accel-Buffering'] = 'no'
