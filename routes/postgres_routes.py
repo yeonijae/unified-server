@@ -479,11 +479,12 @@ def subscribe_all():
         return json_response({"error": f"DB connection failed: {str(e)}"}, 500)
 
     def event_stream():
-        postgres_db.log("[SSE] Generator 시작", force=True)
+        # 즉시 첫 메시지 전송 (Waitress 호환)
+        yield f": SSE stream started\n\n"
+
         conn = None
         cur = None
         try:
-            postgres_db.log("[SSE] Generator 내 DB 연결 시도", force=True)
             conn = psycopg2.connect(
                 host=config.get('host', 'localhost'),
                 port=config.get('port', 5432),
@@ -491,7 +492,6 @@ def subscribe_all():
                 password=config.get('password', ''),
                 database=config.get('database', ''),
             )
-            postgres_db.log("[SSE] Generator 내 DB 연결 성공", force=True)
             conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
             cur = conn.cursor()
             cur.execute("LISTEN table_changes")
@@ -502,34 +502,30 @@ def subscribe_all():
 
             last_keepalive = time.time()
             while True:
-                # Windows 호환: select 대신 poll + sleep 사용
                 conn.poll()
                 while conn.notifies:
                     notify = conn.notifies.pop(0)
                     yield f"data: {notify.payload}\n\n"
 
-                # 5초마다 keepalive 전송
                 if time.time() - last_keepalive >= 5:
                     yield f": keepalive\n\n"
                     last_keepalive = time.time()
 
-                time.sleep(0.1)  # 100ms 간격으로 확인
+                time.sleep(0.1)
         except GeneratorExit:
             postgres_db.log("[SSE] 클라이언트 연결 종료", force=True)
         except Exception as e:
-            postgres_db.log(f"[SSE] Generator 에러: {str(e)}", force=True)
+            postgres_db.log(f"[SSE] 에러: {str(e)}", force=True)
             yield f"data: {{\"type\": \"error\", \"message\": \"{str(e)}\"}}\n\n"
         finally:
-            postgres_db.log("[SSE] Generator 정리 중", force=True)
             if cur:
                 cur.close()
             if conn:
                 conn.close()
 
     postgres_db.log("[SSE] Response 생성 중", force=True)
-    response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
+    response = Response(event_stream(), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
-    response.headers['Connection'] = 'keep-alive'
     response.headers['X-Accel-Buffering'] = 'no'
     postgres_db.log("[SSE] Response 반환", force=True)
     return add_cors_headers(response)
