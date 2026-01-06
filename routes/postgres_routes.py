@@ -20,7 +20,7 @@ postgres_bp = Blueprint('postgres', __name__)
 def add_cors_headers(response):
     """응답에 CORS 헤더 추가"""
     response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
     response.headers['Access-Control-Max-Age'] = '3600'
     # 브라우저 캐싱 방지 (실시간 데이터 API용)
@@ -34,7 +34,7 @@ def cors_preflight_response():
     """OPTIONS preflight 요청에 대한 응답"""
     response = make_response()
     response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
     response.headers['Access-Control-Max-Age'] = '3600'
     return response
