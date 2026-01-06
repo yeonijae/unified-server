@@ -45,6 +45,8 @@ class UnifiedServerGUI:
         # MSSQL → PostgreSQL 대기열 동기화 스레드
         self.waiting_sync_running = False
         self.waiting_sync_thread = None
+        self.sync_count = 0
+        self.last_sync_time = None
 
         self._setup_styles()
         self._create_widgets()
@@ -83,6 +85,7 @@ class UnifiedServerGUI:
         self._create_static_tab(notebook)
         self._create_mssql_tab(notebook)
         self._create_postgres_tab(notebook)
+        self._create_sync_tab(notebook)
         self._create_upload_tab(notebook)
         self._create_webhook_tab(notebook)
         self._create_apikey_tab(notebook)
@@ -344,6 +347,200 @@ class UnifiedServerGUI:
         log_btn_row.pack(fill=tk.X, pady=(3, 0))
         ttk.Button(log_btn_row, text="Clear", command=lambda: self._clear_log(self.postgres_log)).pack(side=tk.RIGHT)
         ttk.Button(log_btn_row, text="Save Settings", command=self._save_postgres_settings).pack(side=tk.RIGHT, padx=5)
+
+
+    # ============ Sync 탭 (MSSQL → PostgreSQL 동기화) ============
+    def _create_sync_tab(self, notebook):
+        tab = ttk.Frame(notebook, padding=10)
+        notebook.add(tab, text=" Sync ")
+
+        # 동기화 상태
+        status_frame = ttk.LabelFrame(tab, text="MSSQL → PostgreSQL 대기열 동기화", padding=8)
+        status_frame.pack(fill=tk.X, pady=(0, 10))
+
+        row1 = ttk.Frame(status_frame)
+        row1.pack(fill=tk.X, pady=2)
+
+        self.sync_status_var = tk.StringVar(value="Stopped")
+        self.sync_status_label = ttk.Label(row1, textvariable=self.sync_status_var, font=('Segoe UI', 10, 'bold'), foreground="red", width=10)
+        self.sync_status_label.pack(side=tk.LEFT)
+
+        self.sync_start_btn = ttk.Button(row1, text="Start", command=self._manual_start_sync)
+        self.sync_start_btn.pack(side=tk.LEFT, padx=5)
+        self.sync_stop_btn = ttk.Button(row1, text="Stop", command=self._manual_stop_sync, state=tk.DISABLED)
+        self.sync_stop_btn.pack(side=tk.LEFT)
+        ttk.Button(row1, text="Sync Now", command=self._manual_sync_once).pack(side=tk.LEFT, padx=10)
+
+        # 설정
+        settings_frame = ttk.LabelFrame(tab, text="Settings", padding=8)
+        settings_frame.pack(fill=tk.X, pady=(0, 10))
+
+        row2 = ttk.Frame(settings_frame)
+        row2.pack(fill=tk.X, pady=2)
+
+        ttk.Label(row2, text="Sync Interval (seconds):").pack(side=tk.LEFT)
+        self.sync_interval_var = tk.IntVar(value=self.config.get("sync_interval", 5))
+        ttk.Spinbox(row2, from_=1, to=60, textvariable=self.sync_interval_var, width=5).pack(side=tk.LEFT, padx=5)
+
+        self.sync_auto_start_var = tk.BooleanVar(value=self.config.get("sync_auto_start", True))
+        ttk.Checkbutton(row2, text="Auto start when both servers running", variable=self.sync_auto_start_var).pack(side=tk.LEFT, padx=15)
+
+        # 통계
+        stats_frame = ttk.LabelFrame(tab, text="Statistics", padding=8)
+        stats_frame.pack(fill=tk.X, pady=(0, 10))
+
+        row3 = ttk.Frame(stats_frame)
+        row3.pack(fill=tk.X, pady=2)
+
+        ttk.Label(row3, text="Last Sync:").pack(side=tk.LEFT)
+        self.last_sync_var = tk.StringVar(value="-")
+        ttk.Label(row3, textvariable=self.last_sync_var, foreground="blue").pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(row3, text="Total Synced:").pack(side=tk.LEFT, padx=(20, 0))
+        self.sync_count_var = tk.StringVar(value="0")
+        ttk.Label(row3, textvariable=self.sync_count_var, foreground="green").pack(side=tk.LEFT, padx=5)
+
+        # 서버 상태
+        server_frame = ttk.LabelFrame(tab, text="Server Status", padding=8)
+        server_frame.pack(fill=tk.X, pady=(0, 10))
+
+        row4 = ttk.Frame(server_frame)
+        row4.pack(fill=tk.X, pady=2)
+
+        ttk.Label(row4, text="MSSQL:").pack(side=tk.LEFT)
+        self.sync_mssql_status_var = tk.StringVar(value="Stopped")
+        self.sync_mssql_label = ttk.Label(row4, textvariable=self.sync_mssql_status_var, foreground="red")
+        self.sync_mssql_label.pack(side=tk.LEFT, padx=(5, 20))
+
+        ttk.Label(row4, text="PostgreSQL:").pack(side=tk.LEFT)
+        self.sync_postgres_status_var = tk.StringVar(value="Stopped")
+        self.sync_postgres_label = ttk.Label(row4, textvariable=self.sync_postgres_status_var, foreground="red")
+        self.sync_postgres_label.pack(side=tk.LEFT, padx=5)
+
+        # 설명
+        desc_frame = ttk.LabelFrame(tab, text="Description", padding=8)
+        desc_frame.pack(fill=tk.X, pady=(0, 10))
+
+        desc_text = """MSSQL Treating(치료대기) 환자를 PostgreSQL waiting_queue에 동기화합니다.
+
+- MSSQL API: /api/queue/status 에서 treating 목록 조회
+- PostgreSQL API: /api/waiting-queue/sync 로 동기화
+- Waiting(접수대기)은 동기화하지 않음 (CS관리에서 수동 처리)
+- 이미 치료실에 배정된 환자는 자동 스킵"""
+        ttk.Label(desc_frame, text=desc_text, foreground="gray", justify=tk.LEFT).pack(anchor=tk.W)
+
+        # 저장 버튼
+        ttk.Button(tab, text="Save Sync Settings", command=self._save_sync_settings).pack(pady=20)
+
+        # 상태 업데이트 타이머
+        self._update_sync_status()
+
+    def _update_sync_status(self):
+        """동기화 탭 상태 업데이트"""
+        # MSSQL 상태
+        if self.mssql_running:
+            self.sync_mssql_status_var.set("Running")
+            self.sync_mssql_label.configure(foreground="green")
+        else:
+            self.sync_mssql_status_var.set("Stopped")
+            self.sync_mssql_label.configure(foreground="red")
+
+        # PostgreSQL 상태
+        if self.postgres_running:
+            self.sync_postgres_status_var.set("Running")
+            self.sync_postgres_label.configure(foreground="green")
+        else:
+            self.sync_postgres_status_var.set("Stopped")
+            self.sync_postgres_label.configure(foreground="red")
+
+        # 동기화 상태
+        if self.waiting_sync_running:
+            self.sync_status_var.set("Running")
+            self.sync_status_label.configure(foreground="green")
+            self.sync_start_btn.configure(state=tk.DISABLED)
+            self.sync_stop_btn.configure(state=tk.NORMAL)
+        else:
+            self.sync_status_var.set("Stopped")
+            self.sync_status_label.configure(foreground="red")
+            self.sync_start_btn.configure(state=tk.NORMAL)
+            self.sync_stop_btn.configure(state=tk.DISABLED)
+
+        # 통계 업데이트
+        self.sync_count_var.set(str(self.sync_count))
+        if self.last_sync_time:
+            self.last_sync_var.set(self.last_sync_time.strftime("%H:%M:%S"))
+
+        # 1초마다 업데이트
+        self.root.after(1000, self._update_sync_status)
+
+    def _manual_start_sync(self):
+        """수동 동기화 시작"""
+        if not self.mssql_running or not self.postgres_running:
+            messagebox.showwarning("Warning", "MSSQL과 PostgreSQL 서버가 모두 실행 중이어야 합니다.")
+            return
+        self._start_waiting_sync()
+
+    def _manual_stop_sync(self):
+        """수동 동기화 중지"""
+        self._stop_waiting_sync()
+
+    def _manual_sync_once(self):
+        """즉시 1회 동기화"""
+        if not self.mssql_running or not self.postgres_running:
+            messagebox.showwarning("Warning", "MSSQL과 PostgreSQL 서버가 모두 실행 중이어야 합니다.")
+            return
+
+        def do_sync():
+            import requests
+            from datetime import datetime
+
+            try:
+                mssql_port = self.mssql_port_var.get()
+                postgres_port = self.postgres_port_var.get()
+
+                mssql_res = requests.get(f"http://localhost:{mssql_port}/api/queue/status", timeout=5)
+                if mssql_res.status_code != 200:
+                    self.root.after(0, lambda: messagebox.showerror("Error", "MSSQL API 오류"))
+                    return
+
+                queue_data = mssql_res.json()
+                treating_list = queue_data.get('treating', [])
+
+                for t in treating_list:
+                    if 'treating_since' in t and 'waiting_since' not in t:
+                        t['waiting_since'] = t['treating_since']
+
+                if not treating_list:
+                    self.root.after(0, lambda: messagebox.showinfo("Info", "동기화할 환자가 없습니다."))
+                    return
+
+                sync_res = requests.post(
+                    f"http://localhost:{postgres_port}/api/waiting-queue/sync",
+                    json={"waiting": treating_list},
+                    timeout=5
+                )
+
+                if sync_res.status_code == 200:
+                    result = sync_res.json()
+                    added = result.get('added', 0)
+                    self.sync_count += added
+                    self.last_sync_time = datetime.now()
+                    self.root.after(0, lambda: messagebox.showinfo("Success", f"동기화 완료: {added}명 추가"))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("Error", "PostgreSQL API 오류"))
+
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("Error", f"동기화 오류: {str(e)}"))
+
+        threading.Thread(target=do_sync, daemon=True).start()
+
+    def _save_sync_settings(self):
+        """동기화 설정 저장"""
+        self.config["sync_interval"] = self.sync_interval_var.get()
+        self.config["sync_auto_start"] = self.sync_auto_start_var.get()
+        save_config(self.config)
+        messagebox.showinfo("Success", "Sync settings saved")
+
 
     # ============ Upload 탭 ============
     def _create_upload_tab(self, notebook):
@@ -1066,7 +1263,8 @@ class UnifiedServerGUI:
         self.waiting_sync_running = True
         self.waiting_sync_thread = threading.Thread(target=self._waiting_sync_loop, daemon=True)
         self.waiting_sync_thread.start()
-        postgres_db.log("대기열 동기화 시작 (5초 간격)", force=True)
+        interval = self.config.get("sync_interval", 5)
+        postgres_db.log(f"대기열 동기화 시작 ({interval}초 간격)", force=True)
 
     def _stop_waiting_sync(self):
         """동기화 중지"""
@@ -1075,19 +1273,22 @@ class UnifiedServerGUI:
             self.waiting_sync_thread = None
 
     def _waiting_sync_loop(self):
-        """10초마다 MSSQL Treating(치료실)을 PostgreSQL waiting_queue에 동기화
+        """설정된 간격으로 MSSQL Treating(치료실)을 PostgreSQL waiting_queue에 동기화
 
         - MSSQL Treating → PostgreSQL waiting_queue (queue_type='treatment')
         - MSSQL Waiting(대기실)은 동기화하지 않음 (CS관리에서 수동 처리)
         """
         import time
         import requests
+        from datetime import datetime
 
         while self.waiting_sync_running:
+            interval = self.config.get("sync_interval", 5)
+
             try:
                 # 두 서버가 모두 실행 중인지 확인
                 if not self.mssql_running or not self.postgres_running:
-                    time.sleep(5)
+                    time.sleep(interval)
                     continue
 
                 mssql_port = self.mssql_port_var.get()
@@ -1100,31 +1301,26 @@ class UnifiedServerGUI:
                         timeout=5
                     )
                     if mssql_res.status_code != 200:
-                        time.sleep(5)
+                        time.sleep(interval)
                         continue
 
                     queue_data = mssql_res.json()
-                    # Waiting(대기실)은 동기화하지 않음 - CS관리에서 수동 처리
-                    # waiting_list = queue_data.get('waiting', [])
                     treating_list = queue_data.get('treating', [])
 
                     # treating 데이터를 waiting 형식에 맞게 변환
                     for t in treating_list:
-                        # treating_since -> waiting_since로 변환
                         if 'treating_since' in t and 'waiting_since' not in t:
                             t['waiting_since'] = t['treating_since']
 
-                    # Treating만 동기화
                     sync_list = treating_list
 
                 except requests.exceptions.RequestException:
-                    # MSSQL 연결 실패 - 조용히 다음 시도
-                    time.sleep(5)
+                    time.sleep(interval)
                     continue
 
-                # 목록이 비어있으면 동기화 스킵 (PostgreSQL 유지)
+                # 목록이 비어있으면 동기화 스킵
                 if not sync_list:
-                    time.sleep(5)
+                    time.sleep(interval)
                     continue
 
                 # 2. PostgreSQL에 동기화
@@ -1138,23 +1334,24 @@ class UnifiedServerGUI:
                     if sync_res.status_code == 200:
                         result = sync_res.json()
                         added = result.get('added', 0)
+                        self.last_sync_time = datetime.now()
                         if added > 0:
+                            self.sync_count += added
                             postgres_db.log(f"대기열 동기화: {added}명 추가", force=True)
 
                 except requests.exceptions.RequestException:
-                    # PostgreSQL 연결 실패 - 조용히 다음 시도
                     pass
 
             except Exception as e:
-                # 예상치 못한 오류 - 로그만 남기고 계속
                 postgres_db.log(f"대기열 동기화 오류: {e}")
 
-            time.sleep(5)
+            time.sleep(interval)
 
     def _check_and_start_waiting_sync(self):
-        """두 서버가 모두 실행 중이면 동기화 시작"""
+        """두 서버가 모두 실행 중이고 auto_start가 활성화되어 있으면 동기화 시작"""
         if self.mssql_running and self.postgres_running:
-            self._start_waiting_sync()
+            if self.config.get("sync_auto_start", True):
+                self._start_waiting_sync()
         else:
             self._stop_waiting_sync()
 

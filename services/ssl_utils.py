@@ -74,6 +74,7 @@ def ensure_cert_exists():
                     x509.DNSName("haniwon-server"),
                     x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
                     x509.IPAddress(ipaddress.IPv4Address("192.168.0.173")),
+                    x509.IPAddress(ipaddress.IPv4Address("192.168.0.61")),
                 ]),
                 critical=False,
             )
