@@ -494,7 +494,7 @@ def subscribe_all():
             )
             conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
             cur = conn.cursor()
-            cur.execute("LISTEN table_changes")
+            cur.execute("LISTEN table_change")
             postgres_db.log("[SSE] LISTEN 성공", force=True)
 
             # 연결 성공 알림
@@ -568,7 +568,7 @@ def subscribe_table(table):
             )
             conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
             cur = conn.cursor()
-            cur.execute("LISTEN table_changes")
+            cur.execute("LISTEN table_change")
 
             yield f"data: {{\"type\": \"connected\", \"table\": \"{table}\"}}\n\n"
 
