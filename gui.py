@@ -48,6 +48,17 @@ class UnifiedServerGUI:
         self.sync_count = 0
         self.last_sync_time = None
 
+        # 요일별 스케줄 기본값 (월~일)
+        self.default_schedule = {
+            "mon": {"enabled": True, "start": "08:30", "end": "18:30"},
+            "tue": {"enabled": True, "start": "08:30", "end": "18:30"},
+            "wed": {"enabled": True, "start": "08:30", "end": "18:30"},
+            "thu": {"enabled": True, "start": "08:30", "end": "18:30"},
+            "fri": {"enabled": True, "start": "08:30", "end": "18:30"},
+            "sat": {"enabled": True, "start": "08:30", "end": "13:00"},
+            "sun": {"enabled": False, "start": "09:00", "end": "12:00"},
+        }
+
         self._setup_styles()
         self._create_widgets()
         self._setup_tray()
@@ -417,20 +428,56 @@ class UnifiedServerGUI:
         self.sync_postgres_label = ttk.Label(row4, textvariable=self.sync_postgres_status_var, foreground="red")
         self.sync_postgres_label.pack(side=tk.LEFT, padx=5)
 
-        # 설명
-        desc_frame = ttk.LabelFrame(tab, text="Description", padding=8)
-        desc_frame.pack(fill=tk.X, pady=(0, 10))
+        # 요일별 스케줄 설정
+        schedule_frame = ttk.LabelFrame(tab, text="Weekly Schedule (동기화 시간)", padding=8)
+        schedule_frame.pack(fill=tk.X, pady=(0, 10))
 
-        desc_text = """MSSQL Treating(치료대기) 환자를 PostgreSQL waiting_queue에 동기화합니다.
+        # 스케줄 변수 초기화
+        schedule_config = self.config.get("sync_schedule", self.default_schedule)
+        self.schedule_vars = {}
 
-- MSSQL API: /api/queue/status 에서 treating 목록 조회
-- PostgreSQL API: /api/waiting-queue/sync 로 동기화
-- Waiting(접수대기)은 동기화하지 않음 (CS관리에서 수동 처리)
-- 이미 치료실에 배정된 환자는 자동 스킵"""
-        ttk.Label(desc_frame, text=desc_text, foreground="gray", justify=tk.LEFT).pack(anchor=tk.W)
+        days = [
+            ("mon", "월"), ("tue", "화"), ("wed", "수"), ("thu", "목"),
+            ("fri", "금"), ("sat", "토"), ("sun", "일")
+        ]
+
+        # 헤더
+        header_row = ttk.Frame(schedule_frame)
+        header_row.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(header_row, text="요일", width=4).pack(side=tk.LEFT)
+        ttk.Label(header_row, text="사용", width=5).pack(side=tk.LEFT)
+        ttk.Label(header_row, text="시작", width=8).pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Label(header_row, text="종료", width=8).pack(side=tk.LEFT, padx=(5, 0))
+
+        for day_key, day_name in days:
+            day_config = schedule_config.get(day_key, self.default_schedule[day_key])
+
+            row = ttk.Frame(schedule_frame)
+            row.pack(fill=tk.X, pady=1)
+
+            ttk.Label(row, text=day_name, width=4).pack(side=tk.LEFT)
+
+            enabled_var = tk.BooleanVar(value=day_config.get("enabled", True))
+            ttk.Checkbutton(row, variable=enabled_var, width=3).pack(side=tk.LEFT)
+
+            start_var = tk.StringVar(value=day_config.get("start", "08:30"))
+            start_entry = ttk.Entry(row, textvariable=start_var, width=6)
+            start_entry.pack(side=tk.LEFT, padx=(5, 0))
+
+            ttk.Label(row, text="~").pack(side=tk.LEFT, padx=2)
+
+            end_var = tk.StringVar(value=day_config.get("end", "18:30"))
+            end_entry = ttk.Entry(row, textvariable=end_var, width=6)
+            end_entry.pack(side=tk.LEFT)
+
+            self.schedule_vars[day_key] = {
+                "enabled": enabled_var,
+                "start": start_var,
+                "end": end_var
+            }
 
         # 저장 버튼
-        ttk.Button(tab, text="Save Sync Settings", command=self._save_sync_settings).pack(pady=20)
+        ttk.Button(tab, text="Save Sync Settings", command=self._save_sync_settings).pack(pady=15)
 
         # 상태 업데이트 타이머
         self._update_sync_status()
@@ -538,6 +585,17 @@ class UnifiedServerGUI:
         """동기화 설정 저장"""
         self.config["sync_interval"] = self.sync_interval_var.get()
         self.config["sync_auto_start"] = self.sync_auto_start_var.get()
+
+        # 스케줄 저장
+        schedule = {}
+        for day_key, vars in self.schedule_vars.items():
+            schedule[day_key] = {
+                "enabled": vars["enabled"].get(),
+                "start": vars["start"].get(),
+                "end": vars["end"].get()
+            }
+        self.config["sync_schedule"] = schedule
+
         save_config(self.config)
         messagebox.showinfo("Success", "Sync settings saved")
 
@@ -1272,11 +1330,39 @@ class UnifiedServerGUI:
         if self.waiting_sync_thread:
             self.waiting_sync_thread = None
 
+
+    def _is_within_schedule(self):
+        """현재 시간이 스케줄 내에 있는지 확인"""
+        from datetime import datetime
+
+        now = datetime.now()
+        day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
+        day_key = day_map[now.weekday()]
+
+        schedule = self.config.get("sync_schedule", self.default_schedule)
+        day_schedule = schedule.get(day_key, self.default_schedule[day_key])
+
+        if not day_schedule.get("enabled", True):
+            return False
+
+        try:
+            start_str = day_schedule.get("start", "08:30")
+            end_str = day_schedule.get("end", "18:30")
+
+            start_time = datetime.strptime(start_str, "%H:%M").time()
+            end_time = datetime.strptime(end_str, "%H:%M").time()
+            current_time = now.time()
+
+            return start_time <= current_time <= end_time
+        except:
+            return True  # 파싱 오류 시 동기화 허용
+
     def _waiting_sync_loop(self):
         """설정된 간격으로 MSSQL Treating(치료실)을 PostgreSQL waiting_queue에 동기화
 
         - MSSQL Treating → PostgreSQL waiting_queue (queue_type='treatment')
         - MSSQL Waiting(대기실)은 동기화하지 않음 (CS관리에서 수동 처리)
+        - 요일별 스케줄에 따라 동기화 실행
         """
         import time
         import requests
@@ -1288,6 +1374,11 @@ class UnifiedServerGUI:
             try:
                 # 두 서버가 모두 실행 중인지 확인
                 if not self.mssql_running or not self.postgres_running:
+                    time.sleep(interval)
+                    continue
+
+                # 스케줄 체크
+                if not self._is_within_schedule():
                     time.sleep(interval)
                     continue
 
