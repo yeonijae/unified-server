@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "4.3.1"  # SSE LISTEN 채널명 수정 (table_changes → table_change)
+APP_VERSION = "4.3.2"  # API 캐시 제어 헤더 추가 (실시간 데이터 갱신 문제 해결)
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
