@@ -608,3 +608,134 @@ def subscribe_table(table):
     response.headers['Connection'] = 'keep-alive'
     response.headers['X-Accel-Buffering'] = 'no'
     return add_cors_headers(response)
+
+
+# ============ MSSQL -> PostgreSQL 동기화 ============
+
+def _ensure_waiting_queue_table():
+    """waiting_queue 테이블 존재 확인 및 생성"""
+    try:
+        sql = """
+        CREATE TABLE IF NOT EXISTS waiting_queue (
+            id SERIAL PRIMARY KEY,
+            patient_id INTEGER NOT NULL,
+            queue_type VARCHAR(50) DEFAULT 'treatment',
+            details TEXT,
+            position INTEGER DEFAULT 0,
+            doctor VARCHAR(100),
+            mssql_waiting_pk INTEGER,
+            mssql_intotime TEXT,
+            synced_at TIMESTAMP,
+            chart_number VARCHAR(50),
+            patient_name VARCHAR(100),
+            age INTEGER,
+            sex VARCHAR(10),
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(patient_id, queue_type)
+        )
+        """
+        postgres_db.execute_query(sql, fetch=False)
+    except Exception as e:
+        postgres_db.log(f"waiting_queue 테이블 생성 오류: {e}")
+
+
+@postgres_bp.route('/api/waiting-queue/sync', methods=['POST', 'OPTIONS'])
+def sync_waiting_queue():
+    """MSSQL Treating 데이터를 PostgreSQL waiting_queue에 동기화
+
+    Request Body:
+        - waiting: MSSQL Treating 테이블 데이터 배열
+          [{id, patient_id, chart_no, patient_name, age, sex, waiting_since, doctor, ...}, ...]
+
+    Response:
+        - added: 추가된 환자 수
+        - skipped_duplicate: 이미 있어서 스킵된 수
+    """
+    if request.method == 'OPTIONS':
+        return cors_preflight_response()
+
+    try:
+        # 테이블 확인/생성
+        _ensure_waiting_queue_table()
+
+        data = request.get_json() or {}
+        mssql_waiting = data.get('waiting', [])
+
+        if not mssql_waiting:
+            return json_response({
+                "added": 0,
+                "skipped_duplicate": 0,
+                "message": "No waiting data provided"
+            })
+
+        # 현재 waiting_queue에 있는 patient_id 조회 (중복 방지)
+        existing = postgres_db.execute_query("""
+            SELECT patient_id FROM waiting_queue
+            WHERE queue_type = 'treatment'
+        """)
+        existing_patient_ids = {row['patient_id'] for row in existing}
+
+        # 현재 최대 position 조회
+        max_pos_result = postgres_db.execute_query(
+            "SELECT COALESCE(MAX(position), -1) as max_pos FROM waiting_queue WHERE queue_type = 'treatment'"
+        )
+        next_position = (max_pos_result[0]['max_pos'] if max_pos_result else -1) + 1
+
+        added = 0
+        skipped_duplicate = 0
+
+        from datetime import datetime
+        now = datetime.now().isoformat()
+
+        for patient in mssql_waiting:
+            patient_id = patient.get('patient_id')
+            intotime = patient.get('waiting_since') or patient.get('intotime')
+
+            if not patient_id:
+                continue
+
+            # 이미 있으면 스킵
+            if patient_id in existing_patient_ids:
+                skipped_duplicate += 1
+                continue
+
+            # INSERT (ON CONFLICT DO NOTHING)
+            try:
+                postgres_db.execute_query("""
+                    INSERT INTO waiting_queue
+                    (patient_id, queue_type, details, position, doctor,
+                     mssql_waiting_pk, mssql_intotime, synced_at,
+                     chart_number, patient_name, age, sex)
+                    VALUES (%s, 'treatment', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (patient_id, queue_type) DO NOTHING
+                """, (
+                    patient_id,
+                    patient.get('status') or '',
+                    next_position,
+                    patient.get('doctor') or '',
+                    patient.get('id'),  # mssql_waiting_pk
+                    intotime,
+                    now,
+                    patient.get('chart_no') or '',
+                    patient.get('patient_name') or '',
+                    patient.get('age'),
+                    patient.get('sex') or ''
+                ), fetch=False)
+
+                next_position += 1
+                added += 1
+                existing_patient_ids.add(patient_id)
+            except Exception as insert_error:
+                postgres_db.log(f"Insert error for patient_id {patient_id}: {insert_error}")
+                skipped_duplicate += 1
+
+        return json_response({
+            "success": True,
+            "added": added,
+            "skipped_duplicate": skipped_duplicate,
+            "message": f"동기화 완료: {added}명 추가"
+        })
+
+    except Exception as e:
+        postgres_db.log(f"waiting_queue 동기화 오류: {e}")
+        return json_response({"error": str(e)}, 500)

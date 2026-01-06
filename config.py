@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "4.2.0"  # Sync 탭 + 요일별 스케줄 설정 추가
+APP_VERSION = "4.2.1"  # PostgreSQL waiting-queue sync 엔드포인트 추가
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
