@@ -562,7 +562,7 @@ class UnifiedServerGUI:
                     return
 
                 sync_res = requests.post(
-                    f"http://localhost:{postgres_port}/api/waiting-queue/sync",
+                    f"http://localhost:{postgres_port}/api/treatments/sync",
                     json={"waiting": treating_list},
                     timeout=5
                 )
@@ -570,9 +570,11 @@ class UnifiedServerGUI:
                 if sync_res.status_code == 200:
                     result = sync_res.json()
                     added = result.get('added', 0)
+                    updated = result.get('updated', 0)
+                    skipped = result.get('skipped', 0)
                     self.sync_count += added
                     self.last_sync_time = datetime.now()
-                    self.root.after(0, lambda: messagebox.showinfo("Success", f"동기화 완료: {added}명 추가"))
+                    self.root.after(0, lambda: messagebox.showinfo("Success", f"동기화 완료: 추가 {added}, 업데이트 {updated}, 스킵 {skipped}"))
                 else:
                     self.root.after(0, lambda: messagebox.showerror("Error", "PostgreSQL API 오류"))
 
@@ -1414,10 +1416,10 @@ class UnifiedServerGUI:
                     time.sleep(interval)
                     continue
 
-                # 2. PostgreSQL에 동기화
+                # 2. PostgreSQL에 동기화 (daily_treatment_records)
                 try:
                     sync_res = requests.post(
-                        f"http://localhost:{postgres_port}/api/waiting-queue/sync",
+                        f"http://localhost:{postgres_port}/api/treatments/sync",
                         json={"waiting": sync_list},
                         timeout=5
                     )
@@ -1425,10 +1427,12 @@ class UnifiedServerGUI:
                     if sync_res.status_code == 200:
                         result = sync_res.json()
                         added = result.get('added', 0)
+                        updated = result.get('updated', 0)
+                        skipped = result.get('skipped', 0)
                         self.last_sync_time = datetime.now()
                         if added > 0:
                             self.sync_count += added
-                            postgres_db.log(f"대기열 동기화: {added}명 추가", force=True)
+                            postgres_db.log(f"치료기록 동기화: 추가 {added}, 업데이트 {updated}, 스킵 {skipped}", force=True)
 
                 except requests.exceptions.RequestException:
                     pass

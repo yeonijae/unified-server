@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "4.2.1"  # PostgreSQL waiting-queue sync 엔드포인트 추가
+APP_VERSION = "4.3.0"  # 치료관리 API (daily_treatment_records 기반 status 관리)
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
