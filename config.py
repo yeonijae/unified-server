@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "4.3.3"  # CORS PATCH 메소드 추가
+APP_VERSION = "4.3.4"  # 스레드 수 증가 (4→64), 연결 제한 증가 (50→200) - 10명×4페이지 SSE 지원
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)

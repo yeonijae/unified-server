@@ -1250,8 +1250,8 @@ class UnifiedServerGUI:
                     self.postgres_app,
                     host='0.0.0.0',
                     port=port,
-                    threads=4,
-                    connection_limit=50,
+                    threads=64,
+                    connection_limit=200,
                     channel_timeout=120,
                     expose_tracebacks=False,
                     ident='Haniwon-PostgreSQL'
