@@ -1,6 +1,8 @@
 flask
 flask-cors
+flask-socketio
 pymssql
+psycopg2-binary
 pystray
 Pillow
 schedule
@@ -8,3 +10,4 @@ watchdog
 pyinstaller
 pycryptodome
 waitress
+bleach

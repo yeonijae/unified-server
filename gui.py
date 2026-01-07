@@ -31,16 +31,20 @@ class UnifiedServerGUI:
         self.static_running = False
         self.mssql_running = False
         self.postgres_running = False
+        self.chat_running = False
 
         # Flask 앱 참조
         self.static_app = None
         self.mssql_app = None
         self.postgres_app = None
+        self.chat_app = None
+        self.chat_socketio = None
 
         # 로그 텍스트 위젯 (나중에 생성)
         self.static_log = None
         self.mssql_log = None
         self.postgres_log = None
+        self.chat_log = None
 
         # MSSQL → PostgreSQL 대기열 동기화 스레드
         self.waiting_sync_running = False
@@ -96,6 +100,7 @@ class UnifiedServerGUI:
         self._create_static_tab(notebook)
         self._create_mssql_tab(notebook)
         self._create_postgres_tab(notebook)
+        self._create_chat_tab(notebook)
         self._create_sync_tab(notebook)
         self._create_upload_tab(notebook)
         self._create_webhook_tab(notebook)
@@ -359,6 +364,82 @@ class UnifiedServerGUI:
         log_btn_row.pack(fill=tk.X, pady=(3, 0))
         ttk.Button(log_btn_row, text="Clear", command=lambda: self._clear_log(self.postgres_log)).pack(side=tk.RIGHT)
         ttk.Button(log_btn_row, text="Save Settings", command=self._save_postgres_settings).pack(side=tk.RIGHT, padx=5)
+
+
+    # ============ Chat Server 탭 ============
+    def _create_chat_tab(self, notebook):
+        tab = ttk.Frame(notebook, padding=10)
+        notebook.add(tab, text=" Chat ")
+
+        # 서버 상태 + 포트 + 버튼 (한 줄)
+        server_frame = ttk.LabelFrame(tab, text="Chat Server (Socket.io)", padding=8)
+        server_frame.pack(fill=tk.X, pady=(0, 8))
+
+        row = ttk.Frame(server_frame)
+        row.pack(fill=tk.X)
+
+        self.chat_status_var = tk.StringVar(value="Stopped")
+        self.chat_status_label = ttk.Label(row, textvariable=self.chat_status_var, font=('Segoe UI', 10, 'bold'), foreground="red", width=8)
+        self.chat_status_label.pack(side=tk.LEFT)
+
+        ttk.Label(row, text="Port:").pack(side=tk.LEFT, padx=(10, 2))
+        self.chat_port_var = tk.IntVar(value=self.config.get("chat_port", 3300))
+        ttk.Entry(row, textvariable=self.chat_port_var, width=6).pack(side=tk.LEFT)
+
+        self.chat_stop_btn = ttk.Button(row, text="Stop", command=self._stop_chat, state=tk.DISABLED)
+        self.chat_stop_btn.pack(side=tk.RIGHT, padx=2)
+        self.chat_start_btn = ttk.Button(row, text="Start", command=self._start_chat)
+        self.chat_start_btn.pack(side=tk.RIGHT, padx=2)
+
+        # DB 설정
+        db_frame = ttk.LabelFrame(tab, text="PostgreSQL Database", padding=8)
+        db_frame.pack(fill=tk.X, pady=(0, 8))
+
+        chat_config = self.config.get("chat", {})
+
+        row1 = ttk.Frame(db_frame)
+        row1.pack(fill=tk.X, pady=2)
+        ttk.Label(row1, text="Host:", width=8).pack(side=tk.LEFT)
+        self.chat_db_host_var = tk.StringVar(value=chat_config.get("host", "192.168.0.173"))
+        ttk.Entry(row1, textvariable=self.chat_db_host_var, width=20).pack(side=tk.LEFT)
+        ttk.Label(row1, text="Port:").pack(side=tk.LEFT, padx=(10, 2))
+        self.chat_db_port_var = tk.IntVar(value=chat_config.get("port", 5432))
+        ttk.Entry(row1, textvariable=self.chat_db_port_var, width=6).pack(side=tk.LEFT)
+
+        row2 = ttk.Frame(db_frame)
+        row2.pack(fill=tk.X, pady=2)
+        ttk.Label(row2, text="Database:", width=8).pack(side=tk.LEFT)
+        self.chat_db_name_var = tk.StringVar(value=chat_config.get("database", "haniwon"))
+        ttk.Entry(row2, textvariable=self.chat_db_name_var, width=15).pack(side=tk.LEFT)
+        ttk.Label(row2, text="User:").pack(side=tk.LEFT, padx=(10, 2))
+        self.chat_db_user_var = tk.StringVar(value=chat_config.get("user", "haniwon_user"))
+        ttk.Entry(row2, textvariable=self.chat_db_user_var, width=15).pack(side=tk.LEFT)
+
+        row3 = ttk.Frame(db_frame)
+        row3.pack(fill=tk.X, pady=2)
+        ttk.Label(row3, text="Password:", width=8).pack(side=tk.LEFT)
+        self.chat_db_pass_var = tk.StringVar(value=chat_config.get("password", ""))
+        ttk.Entry(row3, textvariable=self.chat_db_pass_var, width=20, show="*").pack(side=tk.LEFT)
+        ttk.Button(row3, text="Test", command=self._test_chat_db).pack(side=tk.LEFT, padx=(10, 0))
+
+        # 옵션
+        self.chat_auto_start_var = tk.BooleanVar(value=self.config.get("chat_auto_start", False))
+        ttk.Checkbutton(tab, text="Auto start on startup", variable=self.chat_auto_start_var).pack(anchor=tk.W)
+
+        # 로그
+        log_frame = ttk.LabelFrame(tab, text="Log", padding=5)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+
+        self.chat_log = tk.Text(log_frame, height=5, font=('Consolas', 9), bg='#1e1e1e', fg='#22c55e', state=tk.DISABLED)
+        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.chat_log.yview)
+        self.chat_log.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.chat_log.pack(fill=tk.BOTH, expand=True)
+
+        log_btn_row = ttk.Frame(log_frame)
+        log_btn_row.pack(fill=tk.X, pady=(3, 0))
+        ttk.Button(log_btn_row, text="Clear", command=lambda: self._clear_log(self.chat_log)).pack(side=tk.RIGHT)
+        ttk.Button(log_btn_row, text="Save Settings", command=self._save_chat_settings).pack(side=tk.RIGHT, padx=5)
 
 
     # ============ Sync 탭 (MSSQL → PostgreSQL 동기화) ============
@@ -1346,6 +1427,91 @@ class UnifiedServerGUI:
         self._save_postgres_connection(show_message=False)
         messagebox.showinfo("Success", "PostgreSQL settings saved")
 
+    # ============ Chat Server ============
+    def _start_chat(self):
+        """Chat 서버 시작"""
+        if self.chat_running:
+            return
+
+        port = self.chat_port_var.get()
+        db_config = {
+            'host': self.chat_db_host_var.get(),
+            'port': self.chat_db_port_var.get(),
+            'database': self.chat_db_name_var.get(),
+            'user': self.chat_db_user_var.get(),
+            'password': self.chat_db_pass_var.get()
+        }
+
+        def chat_log(msg):
+            self._append_log(self.chat_log, msg)
+
+        def run_chat():
+            try:
+                from chat.server import create_chat_app
+                self.chat_app, self.chat_socketio = create_chat_app(db_config, chat_log)
+                chat_log(f"Starting on port {port}...")
+                self.chat_socketio.run(
+                    self.chat_app,
+                    host='0.0.0.0',
+                    port=port,
+                    debug=False,
+                    use_reloader=False
+                )
+            except Exception as e:
+                chat_log(f"Error: {e}")
+                self.chat_running = False
+                self.root.after(0, lambda: self.chat_status_var.set("Error"))
+                self.root.after(0, lambda: self.chat_status_label.configure(foreground="red"))
+
+        self.chat_running = True
+        threading.Thread(target=run_chat, daemon=True).start()
+
+        chat_log(f"Chat server starting on port {port}...")
+        self.chat_status_var.set("Running")
+        self.chat_status_label.configure(foreground="green")
+        self.chat_start_btn.configure(state=tk.DISABLED)
+        self.chat_stop_btn.configure(state=tk.NORMAL)
+
+    def _stop_chat(self):
+        """Chat 서버 중지"""
+        self.chat_running = False
+        self._append_log(self.chat_log, "서버 중지됨")
+        self.chat_status_var.set("Stopped")
+        self.chat_status_label.configure(foreground="orange")
+        self.chat_start_btn.configure(state=tk.NORMAL)
+        self.chat_stop_btn.configure(state=tk.DISABLED)
+
+    def _test_chat_db(self):
+        """Chat DB 연결 테스트"""
+        import psycopg2
+        try:
+            conn = psycopg2.connect(
+                host=self.chat_db_host_var.get(),
+                port=self.chat_db_port_var.get(),
+                database=self.chat_db_name_var.get(),
+                user=self.chat_db_user_var.get(),
+                password=self.chat_db_pass_var.get(),
+                connect_timeout=5
+            )
+            conn.close()
+            messagebox.showinfo("Success", "PostgreSQL 연결 성공!")
+        except Exception as e:
+            messagebox.showerror("Error", f"연결 실패:\n{e}")
+
+    def _save_chat_settings(self):
+        """Chat 서버 설정 저장"""
+        self.config["chat_port"] = self.chat_port_var.get()
+        self.config["chat_auto_start"] = self.chat_auto_start_var.get()
+        self.config["chat"] = {
+            "host": self.chat_db_host_var.get(),
+            "port": self.chat_db_port_var.get(),
+            "database": self.chat_db_name_var.get(),
+            "user": self.chat_db_user_var.get(),
+            "password": self.chat_db_pass_var.get()
+        }
+        save_config(self.config)
+        messagebox.showinfo("Success", "Chat settings saved")
+
     # ============ MSSQL → PostgreSQL 대기열 동기화 ============
     def _start_waiting_sync(self):
         """MSSQL Waiting → PostgreSQL waiting_queue 백그라운드 동기화 시작"""
@@ -1506,6 +1672,11 @@ class UnifiedServerGUI:
         if self.postgres_auto_start_var.get():
             postgres_db.log("자동 시작", force=True)
             self._start_postgres()
+            any_auto_started = True
+
+        if self.chat_auto_start_var.get():
+            self._append_log(self.chat_log, "자동 시작")
+            self._start_chat()
             any_auto_started = True
 
         # Health Monitor 시작 (자동 재시작: 매일 새벽 4시)

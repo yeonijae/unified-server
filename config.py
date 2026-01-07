@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "4.4.1"  # Git Clone 기능 추가
+APP_VERSION = "4.5.0"  # Chat Server 추가
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
@@ -71,7 +71,18 @@ DEFAULT_CONFIG = {
 
     # AI API Keys
     "openai_api_key": "",
-    "gemini_api_key": ""
+    "gemini_api_key": "",
+
+    # Chat Server
+    "chat_port": 3300,
+    "chat_auto_start": False,
+    "chat": {
+        "host": "192.168.0.173",
+        "port": 5432,
+        "user": "haniwon_user",
+        "password": "7582",
+        "database": "haniwon"
+    }
 }
 
 
@@ -114,6 +125,13 @@ def load_config():
             for k, v in DEFAULT_CONFIG['postgres'].items():
                 if k not in config['postgres']:
                     config['postgres'][k] = v
+        # chat 하위 키 확인
+        if 'chat' not in config:
+            config['chat'] = DEFAULT_CONFIG['chat']
+        else:
+            for k, v in DEFAULT_CONFIG['chat'].items():
+                if k not in config['chat']:
+                    config['chat'][k] = v
         return config
     except:
         pass
