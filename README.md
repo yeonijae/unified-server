@@ -1,13 +1,13 @@
 # Haniwon Unified Server
 
-한의원 통합 서버 - Static, MSSQL, SQLite 3개 서버를 하나의 GUI로 관리
+한의원 통합 서버 - Static, MSSQL, PostgreSQL 3개 서버를 하나의 GUI로 관리
 
 ## 주요 기능
 
 ### 3개 서버 통합 관리
 - **Static Server** (포트 11111): 정적 파일 서빙, Git Pull + Bun Build 지원
-- **MSSQL Server** (포트 3100): MSSQL 데이터베이스 API
-- **SQLite Server** (포트 3200): SQLite 데이터베이스 API + 파일 업로드
+- **MSSQL Server** (포트 3100): MSSQL 데이터베이스 API (차트 프로그램 DB)
+- **PostgreSQL Server** (포트 3200): PostgreSQL 데이터베이스 API + 파일 업로드
 
 ### 특징
 - Windows 시스템 트레이 상주
@@ -48,13 +48,13 @@ unified-server/
 ├── routes/
 │   ├── static_routes.py    # Static 서버 라우트
 │   ├── mssql_routes.py     # MSSQL API 라우트 (원본)
-│   ├── sqlite_routes.py    # SQLite API 라우트
+│   ├── postgres_routes.py  # PostgreSQL API 라우트
 │   └── file_routes.py      # 파일 업로드/다운로드 API
 │
 └── services/
     ├── mssql_db.py         # MSSQL Connection Pool
     ├── mssql_loader.py     # MSSQL 라우트 로더 (암호화 지원)
-    ├── sqlite_db.py        # SQLite 관리
+    ├── postgres_db.py      # PostgreSQL Connection Pool
     ├── git_build.py        # Git/Bun 빌드 관리
     ├── crypto_loader.py    # 암호화 모듈 로더
     ├── secure_config.py    # 암호화 설정 관리
@@ -71,7 +71,7 @@ unified-server/
 - `POST /api/execute` - SQL 쿼리 실행
 - 기타 통계/추이 API 다수
 
-### SQLite API (포트 3200)
+### PostgreSQL API (포트 3200)
 - `POST /api/execute` - SQL 쿼리 실행
 - `GET /api/tables` - 테이블 목록
 - `POST /api/files/upload` - 파일 업로드
