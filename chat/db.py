@@ -91,7 +91,24 @@ def test_connection() -> bool:
 
 def ensure_tables():
     """필요한 테이블 생성 확인"""
-    # chat_sessions 테이블 생성 (없으면)
+
+    # 1. chat_users 테이블
+    execute("""
+        CREATE TABLE IF NOT EXISTS chat_users (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            email VARCHAR(255) NOT NULL UNIQUE,
+            password_hash VARCHAR(255),
+            display_name VARCHAR(100) NOT NULL,
+            avatar_url TEXT,
+            avatar_color VARCHAR(7),
+            status VARCHAR(20) DEFAULT 'offline',
+            is_active BOOLEAN DEFAULT true,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    """)
+
+    # 2. chat_sessions 테이블
     execute("""
         CREATE TABLE IF NOT EXISTS chat_sessions (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -103,12 +120,71 @@ def ensure_tables():
         )
     """)
 
+    # 3. chat_channels 테이블
+    execute("""
+        CREATE TABLE IF NOT EXISTS chat_channels (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            type VARCHAR(20) NOT NULL DEFAULT 'group',
+            name VARCHAR(100),
+            description TEXT,
+            avatar_url TEXT,
+            is_private BOOLEAN DEFAULT false,
+            created_by UUID REFERENCES chat_users(id),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            deleted_at TIMESTAMP WITH TIME ZONE
+        )
+    """)
+
+    # 4. chat_channel_members 테이블
+    execute("""
+        CREATE TABLE IF NOT EXISTS chat_channel_members (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            channel_id UUID NOT NULL REFERENCES chat_channels(id) ON DELETE CASCADE,
+            user_id UUID NOT NULL REFERENCES chat_users(id) ON DELETE CASCADE,
+            role VARCHAR(20) DEFAULT 'member',
+            last_read_message_id UUID,
+            last_read_at TIMESTAMP WITH TIME ZONE,
+            is_muted BOOLEAN DEFAULT false,
+            joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(channel_id, user_id)
+        )
+    """)
+
+    # 5. chat_messages 테이블
+    execute("""
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            channel_id UUID NOT NULL REFERENCES chat_channels(id) ON DELETE CASCADE,
+            sender_id UUID REFERENCES chat_users(id) ON DELETE SET NULL,
+            parent_id UUID REFERENCES chat_messages(id) ON DELETE CASCADE,
+            thread_count INTEGER DEFAULT 0,
+            content TEXT NOT NULL,
+            type VARCHAR(20) DEFAULT 'text',
+            metadata JSONB DEFAULT '{}',
+            is_edited BOOLEAN DEFAULT false,
+            is_pinned BOOLEAN DEFAULT false,
+            deleted_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    """)
+
+    # 6. chat_user_preferences 테이블 (레이아웃 저장용)
+    execute("""
+        CREATE TABLE IF NOT EXISTS chat_user_preferences (
+            user_id UUID PRIMARY KEY REFERENCES chat_users(id) ON DELETE CASCADE,
+            layout_data JSONB DEFAULT '{}',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    """)
+
     # 인덱스 생성
-    execute("""
-        CREATE INDEX IF NOT EXISTS idx_chat_sessions_token ON chat_sessions(token)
-    """)
-    execute("""
-        CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)
-    """)
+    execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_token ON chat_sessions(token)")
+    execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)")
+    execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_channel_id ON chat_messages(channel_id)")
+    execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at DESC)")
+    execute("CREATE INDEX IF NOT EXISTS idx_chat_channel_members_user_id ON chat_channel_members(user_id)")
 
     log("Tables ensured")

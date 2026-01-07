@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "4.5.1"  # Chat Server CORS 수정
+APP_VERSION = "4.5.2"  # Chat Server 테이블 자동 생성
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
