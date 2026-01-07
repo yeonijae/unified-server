@@ -1455,7 +1455,8 @@ class UnifiedServerGUI:
                     host='0.0.0.0',
                     port=port,
                     debug=False,
-                    use_reloader=False
+                    use_reloader=False,
+                    allow_unsafe_werkzeug=True
                 )
             except Exception as e:
                 chat_log(f"Error: {e}")
