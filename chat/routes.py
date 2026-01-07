@@ -12,17 +12,34 @@ import bleach
 
 chat_bp = Blueprint('chat', __name__, url_prefix='/api/v1')
 
-# CORS 헤더 추가
-def add_cors_headers(response):
+
+# 전역 CORS 핸들러 - OPTIONS 요청 처리
+@chat_bp.before_request
+def handle_preflight():
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '86400'
+        return response
+
+
+# 모든 응답에 CORS 헤더 추가
+@chat_bp.after_request
+def after_request_cors(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
     return response
 
 
 def cors_preflight():
     response = jsonify({'status': 'ok'})
-    return add_cors_headers(response)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return response
 
 
 def json_response(data, status=200):

@@ -39,8 +39,15 @@ def create_chat_app(config: dict, log_callback=None) -> tuple:
     app = Flask(__name__)
     app.config['SECRET_KEY'] = 'haniwon-chat-secret-key'
 
-    # CORS 설정
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    # CORS 설정 - 모든 origin, 메서드, 헤더 허용
+    CORS(app, resources={
+        r"/api/*": {
+            "origins": "*",
+            "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": False
+        }
+    })
 
     # Socket.io 설정
     socketio = SocketIO(
