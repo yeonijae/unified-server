@@ -146,6 +146,7 @@ class UnifiedServerGUI:
 
         build_row = ttk.Frame(build_frame)
         build_row.pack(fill=tk.X)
+        ttk.Button(build_row, text="Git Clone", command=self._git_clone).pack(side=tk.LEFT, padx=2)
         ttk.Button(build_row, text="Git Pull", command=self._git_pull).pack(side=tk.LEFT, padx=2)
         ttk.Button(build_row, text="Install", command=self._bun_install).pack(side=tk.LEFT, padx=2)
         ttk.Button(build_row, text="Build", command=self._bun_build).pack(side=tk.LEFT, padx=2)
@@ -984,6 +985,64 @@ class UnifiedServerGUI:
         self.static_status_label.configure(foreground="orange")
         self.static_start_btn.configure(state=tk.NORMAL)
         self.static_stop_btn.configure(state=tk.DISABLED)
+
+    def _git_clone(self):
+        www_folder = self.www_folder_var.get()
+        if not www_folder:
+            messagebox.showerror("Error", "WWW 폴더를 선택해주세요.")
+            return
+
+        # .git 폴더가 이미 있으면 경고
+        git_dir = Path(www_folder) / ".git"
+        if git_dir.exists():
+            messagebox.showinfo("Info", "이미 Git 저장소입니다. Git Pull을 사용하세요.")
+            return
+
+        # 저장된 repo_url 사용 또는 입력 받기
+        repo_url = self.config.get("repo_url", "")
+        if not repo_url:
+            repo_url = "https://github.com/yeonijae/haniwon.git"
+
+        # 간단한 입력 다이얼로그
+        from tkinter import simpledialog
+        repo_url = simpledialog.askstring(
+            "Git Clone",
+            "Repository URL:",
+            initialvalue=repo_url,
+            parent=self.root
+        )
+
+        if not repo_url:
+            return
+
+        # repo_url 저장
+        self.config["repo_url"] = repo_url
+        save_config(self.config)
+
+        # 폴더가 비어있지 않으면 경고
+        target_path = Path(www_folder)
+        if target_path.exists() and any(target_path.iterdir()):
+            if not messagebox.askyesno("Warning", f"폴더가 비어있지 않습니다.\n{www_folder}\n\n폴더를 삭제하고 Clone할까요?"):
+                return
+            # 폴더 삭제
+            import shutil
+            try:
+                shutil.rmtree(www_folder)
+                git_build.log(f"폴더 삭제: {www_folder}")
+            except Exception as e:
+                messagebox.showerror("Error", f"폴더 삭제 실패: {e}")
+                return
+
+        # Clone 실행
+        def do_clone():
+            git_build.log(f"Cloning {repo_url}...")
+            success = git_build.run_git_clone(repo_url, www_folder)
+            if success:
+                git_build.log("Clone 완료!")
+            else:
+                git_build.log("Clone 실패")
+
+        threading.Thread(target=do_clone, daemon=True).start()
 
     def _git_pull(self):
         www_folder = self.www_folder_var.get()

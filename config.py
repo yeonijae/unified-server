@@ -10,7 +10,7 @@ import json
 import winreg
 from pathlib import Path
 
-APP_VERSION = "4.4.0"  # HTTPS 서버 제거 (11443 포트), SQLite 참조 정리
+APP_VERSION = "4.4.1"  # Git Clone 기능 추가
 APP_NAME = "Haniwon Unified Server"
 
 # 하위 호환성 (기존 코드에서 VERSION 사용 시)
