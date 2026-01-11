@@ -652,6 +652,7 @@ def receipts_by_date():
 
                 if not is_covered and '술혈명' not in px_name:
                     uncovered_items.append({
+                        'id': d['id'],
                         'name': px_name or tx_item,
                         'amount': int(d['amount'] or 0)
                     })
@@ -908,6 +909,7 @@ def receipts_by_patient():
 
                 if not is_covered and '술혈명' not in px_name:
                     uncovered_items.append({
+                        'id': d['id'],
                         'name': px_name or tx_item,
                         'amount': int(d['amount'] or 0)
                     })
@@ -1759,6 +1761,7 @@ def today_pending_payments():
             # 2. 각 환자의 치료 항목 조회
             cursor.execute("""
                 SELECT
+                  Detail_PK as id,
                   TxItem,
                   PxName,
                   InsuYes,
@@ -1802,6 +1805,7 @@ def today_pending_payments():
                 # 비급여 항목 (술혈명 제외)
                 if not is_covered and '술혈명' not in px_name:
                     uncovered_items.append({
+                        'id': d['id'],
                         'name': px_name or tx_item,
                         'amount': d['TxMoney'] or 0
                     })
