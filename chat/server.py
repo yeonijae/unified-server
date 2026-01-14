@@ -86,6 +86,17 @@ def create_chat_app(config: dict, log_callback=None) -> tuple:
     def index():
         return {'message': 'HaniChat Server', 'version': '1.0.0'}
 
+    # 업로드 파일 서빙
+    import os
+    from flask import send_from_directory
+
+    uploads_folder = os.path.join(os.path.dirname(__file__), '..', 'uploads')
+    os.makedirs(uploads_folder, exist_ok=True)
+
+    @app.route('/uploads/<path:filepath>')
+    def serve_uploads(filepath):
+        return send_from_directory(uploads_folder, filepath)
+
     _app = app
     _socketio = socketio
 

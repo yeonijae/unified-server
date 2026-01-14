@@ -61,7 +61,7 @@ def validate_session(token: str) -> dict | None:
 
     result = _db.query_one(
         """
-        SELECT s.user_id, s.expires_at, u.email, u.display_name, u.avatar_url, u.avatar_color
+        SELECT s.user_id, s.expires_at, u.display_name, u.avatar_url, u.avatar_color
         FROM chat_sessions s
         JOIN chat_users u ON s.user_id = u.id
         WHERE s.token = %s AND s.expires_at > NOW()
@@ -77,7 +77,6 @@ def validate_session(token: str) -> dict | None:
         )
         return {
             'id': str(result['user_id']),
-            'email': result['email'],
             'display_name': result['display_name'],
             'avatar_url': result.get('avatar_url'),
             'avatar_color': result.get('avatar_color')

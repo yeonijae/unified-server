@@ -96,7 +96,8 @@ def ensure_tables():
     execute("""
         CREATE TABLE IF NOT EXISTS chat_users (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            email VARCHAR(255) NOT NULL UNIQUE,
+            portal_user_id VARCHAR(100) UNIQUE,
+            email VARCHAR(255) UNIQUE,
             password_hash VARCHAR(255),
             display_name VARCHAR(100) NOT NULL,
             avatar_url TEXT,
@@ -107,6 +108,18 @@ def ensure_tables():
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
     """)
+
+    # portal_user_id 컬럼 추가 (기존 테이블용)
+    try:
+        execute("ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS portal_user_id VARCHAR(100) UNIQUE")
+    except:
+        pass
+
+    # email 컬럼 NOT NULL 제약조건 제거 (포털 인증에서는 email 불필요)
+    try:
+        execute("ALTER TABLE chat_users ALTER COLUMN email DROP NOT NULL")
+    except:
+        pass
 
     # 2. chat_sessions 테이블
     execute("""
@@ -180,11 +193,46 @@ def ensure_tables():
         )
     """)
 
+    # 7. chat_message_reactions 테이블
+    execute("""
+        CREATE TABLE IF NOT EXISTS chat_message_reactions (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            message_id UUID NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+            user_id UUID NOT NULL REFERENCES chat_users(id) ON DELETE CASCADE,
+            emoji VARCHAR(50) NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(message_id, user_id, emoji)
+        )
+    """)
+
+    # 8. chat_user_settings 테이블
+    execute("""
+        CREATE TABLE IF NOT EXISTS chat_user_settings (
+            user_id UUID PRIMARY KEY REFERENCES chat_users(id) ON DELETE CASCADE,
+            notification_enabled BOOLEAN DEFAULT true,
+            notification_sound BOOLEAN DEFAULT true,
+            theme VARCHAR(20) DEFAULT 'system',
+            language VARCHAR(10) DEFAULT 'ko',
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    """)
+
     # 인덱스 생성
     execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_token ON chat_sessions(token)")
     execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)")
     execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_channel_id ON chat_messages(channel_id)")
     execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at DESC)")
     execute("CREATE INDEX IF NOT EXISTS idx_chat_channel_members_user_id ON chat_channel_members(user_id)")
+
+    # 기존 테이블에 누락된 컬럼 추가
+    try:
+        execute("ALTER TABLE chat_channels ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE")
+        execute("ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS status_message VARCHAR(255)")
+        execute("ALTER TABLE chat_users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP WITH TIME ZONE")
+        execute("ALTER TABLE chat_channel_members ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT false")
+        execute("CREATE INDEX IF NOT EXISTS idx_chat_message_reactions_message_id ON chat_message_reactions(message_id)")
+    except:
+        pass  # 컬럼이 이미 있거나 에러 무시
 
     log("Tables ensured")
